@@ -1,12 +1,4 @@
-# Recreate the single-file HTML app and a zip fallback for easy GitHub upload
-from pathlib import Path
-import zipfile, datetime
-
-base = Path("/mnt/data")
-html_path = base / "center-car-expenses-app-index.html"
-zip_path = base / "center-car-expenses-app-single-file.zip"
-
-html = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="el">
   <head>
     <meta charset="UTF-8" />
@@ -21,9 +13,9 @@ html = """<!DOCTYPE html>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
     <style>
       :root { --bg:#f6f6f6; --fg:#111; --card:#fff; --muted:#666; --border:#ddd; }
-      body{margin:0;font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:var(--bg); color:var(--fg);}
-      header{position:sticky;top:0;backdrop-filter:blur(6px); background:rgba(255,255,255,.9); border-bottom:1px solid var(--border);}
-      .container{max-width:1120px;margin:0 auto;padding:12px 16px;}
+      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--fg)}
+      header{position:sticky;top:0;backdrop-filter:blur(6px);background:rgba(255,255,255,.9);border-bottom:1px solid var(--border)}
+      .container{max-width:1120px;margin:0 auto;padding:12px 16px}
       .row{display:flex;gap:8px;flex-wrap:wrap}
       .btn{padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:#fff;cursor:pointer}
       .btn.primary{background:#111;color:#fff;border-color:#111}
@@ -36,15 +28,16 @@ html = """<!DOCTYPE html>
       .card{background:var(--card);border-radius:16px;box-shadow:0 2px 6px rgba(0,0,0,.06);padding:16px}
       .title{font-weight:700}
       .muted{color:var(--muted);font-size:14px}
-      input, select{padding:8px 10px;border:1px solid var(--border);border-radius:12px;background:#fff}
+      input,select{padding:8px 10px;border:1px solid var(--border);border-radius:12px;background:#fff}
       table{width:100%;border-collapse:collapse;font-size:14px}
-      th, td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
-      .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+      th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+      .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
       .pill{background:#f1f1f1;padding:6px 10px;border-radius:999px;display:inline-block}
     </style>
   </head>
   <body>
     <div id="root"></div>
+
     <script type="text/babel">
       const { useState, useEffect } = React;
       const STORAGE_KEY = "centercar-expense-app-v1";
@@ -80,10 +73,11 @@ html = """<!DOCTYPE html>
 
         useEffect(()=>{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }, [state]);
 
+        // Demo αρχικά δεδομένα
         useEffect(()=>{
           if(state.vehicles.length===0 && state.expenses.length===0 && state.capital.ledger.length===0){
             const v1 = { id:uid(), title:"BMW M440d xDrive Coupé", vin:"WBA51AS000CM62527", purchasePrice:57890, purchaseDate:"2024-05-17", ownership:"solo", ownerSharePct:100, partnerName:"", salePrice:0, saleDate:"", settled:false };
-            const v2 = { id:uid(), title:"Range Rover Sport 3.0 V6 HSE", vin:"SALWA2KF86A113553", purchasePrice:61800, purchaseDate:"2024-12-28", ownership:"partner", ownerSharePct:50, partnerName: "Χρήστος", salePrice:0, saleDate:"", settled:false };
+            const v2 = { id:uid(), title:"Range Rover Sport 3.0 V6 HSE", vin:"SALWA2KF86A113553", purchasePrice:61800, purchaseDate:"2024-12-28", ownership:"partner", ownerSharePct:50, partnerName:"Χρήστος", salePrice:0, saleDate:"", settled:false };
             setState(s=>({
               ...s,
               capital:{ ...s.capital, personal:20000, storeTotal:120000, ledger:[
@@ -102,6 +96,7 @@ html = """<!DOCTYPE html>
           }
         }, []);
 
+        // Helpers
         const vehicleExpenses = (id) => state.expenses.filter(e=>e.type==="vehicle" && e.vehicleId===id).reduce((a,b)=>a+(b.amount||0),0);
         const vehicleProfit = (v) => (!v.salePrice || v.salePrice<=0)? 0 : (v.salePrice - (v.purchasePrice||0) - vehicleExpenses(v.id));
         const ownerShare = (v) => (v.ownership==="solo"?100:(v.ownerSharePct ?? 50));
@@ -114,6 +109,7 @@ html = """<!DOCTYPE html>
         const monthPersonalCashflow = (ym) => monthOwnerVehicleNet(ym) - monthOverheadsSum(ym, ["shop","home","personal"]);
         const stockVehicles = state.vehicles.filter(v=> !v.saleDate || !v.settled);
 
+        // Actions
         const addVehicle = () => {
           const v = {
             id: uid(),
@@ -171,12 +167,12 @@ html = """<!DOCTYPE html>
         const deleteExpense = (id) => setState(s=>({ ...s, expenses: s.expenses.filter(e=> e.id!==id) }));
         const deleteCapital = (id) => setState(s=>({ ...s, capital: { ...s.capital, ledger: s.capital.ledger.filter(l=> l.id!==id) } }));
 
+        // Export/Import
         const exportJSON = () => {
           const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a"); a.href=url; a.download=`CenterCar-App-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(url);
         };
-
         const importJSON = (file) => {
           if(!file) return;
           const reader = new FileReader();
@@ -184,6 +180,7 @@ html = """<!DOCTYPE html>
           reader.readAsText(file);
         };
 
+        // PDF
         const exportPDF = () => {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF({ unit:"pt", format:"a4" });
@@ -340,24 +337,6 @@ html = """<!DOCTYPE html>
                         <input placeholder="Σημείωση" style={{flex:1}} value={vehicleExpenseForm.note} onChange={e=>setVehicleExpenseForm({...vehicleExpenseForm,note:e.target.value})}/>
                       </div>
                       <div style={{marginTop:8}}><button className="btn primary" onClick={addVehicleExpense}>Προσθήκη</button></div>
-                    </div>
-
-                    <div className="card">
-                      <div className="title">+ Overhead (Shop/Home/Personal)</div>
-                      <div className="row">
-                        <select value={overheadForm.category} onChange={e=>setOverheadForm({...overheadForm,category:e.target.value})}>
-                          <option value="shop">Shop</option>
-                          <option value="home">Home</option>
-                          <option value="personal">Personal</option>
-                        </select>
-                        <input placeholder="Ποσό" type="number" value={overheadForm.amount} onChange={e=>setOverheadForm({...overheadForm,amount:e.target.value})}/>
-                        <input placeholder="Ημ/νία" type="date" value={overheadForm.date} onChange={e=>setOverheadForm({...overheadForm,date:e.target.value})}/>
-                        <input placeholder="Σημείωση" style={{flex:1}} value={overheadForm.note} onChange={e=>setOverheadForm({...overheadForm,note:e.target.value})}/>
-                      </div>
-                      <div className="row" style={{marginTop:8}}>
-                        <button className="btn primary" onClick={addOverhead}>Προσθήκη</button>
-                        {state.quickTemplates.map(t=>(<button key={t.id} className="btn" onClick={()=>useQuickTemplate(t)}>{t.label} (+€{fmt(t.amount)})</button>))}
-                      </div>
                     </div>
                   </div>
 
@@ -516,15 +495,13 @@ html = """<!DOCTYPE html>
       }
 
       function StatCard({title, value}){
-        return <div className="card"><div className="muted">{title}</div><div style={{fontSize:24, fontWeight:600}}>{value}</div></div>;
+        return <div className="card"><div className="muted">{title}</div><div style={{fontSize:24,fontWeight:600}}>{value}</div></div>;
       }
-
       function QuickTemplates({templates, onUse}){
         return <div className="card"><div className="title">Quick Overheads</div><div className="row" style={{marginTop:8}}>{templates.map(t=>(
           <button key={t.id} className="btn" onClick={()=>onUse(t)}>{t.label} (+€{fmt(t.amount)})</button>
         ))}</div></div>;
       }
-
       function StockTable({ state, vehicleExpenses, ownerShare, daysBetween, today }){
         return <div className="card"><div className="title">Stock (σε εξέλιξη)</div>
           <table>
@@ -543,7 +520,6 @@ html = """<!DOCTYPE html>
           </table>
         </div>;
       }
-
       function VehicleList({ state, vehicleExpenses, ownerShare, ownerNetOnVehicle, deleteVehicle }){
         const vehicleProfit = (v) => (!v.salePrice || v.salePrice<=0)? 0 : (v.salePrice - (v.purchasePrice||0) - vehicleExpenses(v.id));
         return <table>
@@ -566,7 +542,6 @@ html = """<!DOCTYPE html>
           })}</tbody>
         </table>;
       }
-
       function OverheadList({ state, deleteExpense }){
         return <table>
           <thead><tr><th>Ημ/νία</th><th>Κατηγορία</th><th>Ποσό</th><th>Σημείωση</th><th></th></tr></thead>
@@ -578,7 +553,6 @@ html = """<!DOCTYPE html>
           ))}</tbody>
         </table>;
       }
-
       function VehicleExpenseList({ state, vehicles, deleteExpense }){
         const nameOf = (id) => vehicles.find(v=>v.id===id)?.title || "—";
         return <table>
@@ -597,13 +571,3 @@ html = """<!DOCTYPE html>
     </script>
   </body>
 </html>
-"""
-
-# write files
-html_path.write_text(html, encoding="utf-8")
-
-# zip fallback
-with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-    z.write(html_path, arcname="index.html")
-
-str(html_path), str(zip_path)
