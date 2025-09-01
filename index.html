@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Center Car • V2.1 (Ελληνικά + Αγγλικοί όροι)</title>
+  <title>Center Car • V2.2 (Ελληνικά + Αγγλικοί όροι)</title>
   <!-- React/Babel -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -21,6 +21,7 @@
     .btn{padding:10px 12px;border:1px solid var(--border);background:#fff;border-radius:12px;cursor:pointer}
     .btn.primary{background:#111;color:#fff;border-color:#111}
     .btn.green{background:#10b981;color:#fff;border-color:#10b981}
+    .btn.red{background:#dc2626;color:#fff;border-color:#dc2626}
     .tabs button{padding:8px 12px;border-radius:12px;border:1px solid var(--border);background:#fff}
     .tabs .active{background:#111;color:#fff;border-color:#111}
     .grid{display:grid;gap:16px}
@@ -44,8 +45,7 @@
   <div id="root"></div>
   <script type="text/babel">
   const {useState,useEffect} = React;
-
-  const STORAGE_KEY = "centercar-v21-gr-en";
+  const STORAGE_KEY = "centercar-v22-gr-en";
   const uid = () => Math.random().toString(36).slice(2);
   const todayStr = () => new Date().toISOString().slice(0,10);
   const fmt = n => (n??0).toLocaleString("el-GR",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -59,7 +59,7 @@
       weeklyPersonalCap:800,
       reportMode:"cash" // cash | accrual
     },
-    capital:{ // ΜΟΝΟ προσωπικό κεφάλαιο (Personal)
+    capital:{ // Προσωπικό Κεφάλαιο (βάση + κινήσεις ledger)
       personal: 0,
       ledger: [] // {id,date,type:'in'|'out',amount,note}
     },
@@ -70,22 +70,23 @@
 
   function App(){
     const [state,setState] = useState(()=>{
-      try{const raw=localStorage.getItem(STORAGE_KEY); return raw? JSON.parse(raw): seed(defaultState);}
-      catch(e){return seed(defaultState);}
+      try{const raw=localStorage.getItem(STORAGE_KEY); return raw? JSON.parse(raw): seed(defaultState);}catch(e){return seed(defaultState);}
     });
     const [tab,setTab] = useState("dashboard");
     const [reportMonth,setReportMonth] = useState(ym(todayStr()));
     useEffect(()=>{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); },[state]);
 
-    // Helpers
+    // ===== Helpers =====
     const getVehicle = id => state.vehicles.find(v=>v.id===id);
     const vehicleExpensesTotal = (vid) => state.expenses.filter(e=>e.type==="vehicle" && e.vehicleId===vid).reduce((a,b)=>a+(b.amount||0),0);
     const vehicleCommittedCapital = (v) => v.partners.reduce((a,p)=>a+(p.capital||0),0);
     const totalCommittedAllPartners = state.vehicles.filter(v=>!v.customerVehicle).reduce((a,v)=>a+vehicleCommittedCapital(v),0);
+    const ownerName = state.profile.ownerName || "Άγγελος";
 
     const unpaidOverheads = state.expenses.filter(e=>e.type==="overhead" && e.status!=="paid");
     const paidOverheads   = state.expenses.filter(e=>e.type==="overhead" && e.status==="paid");
 
+    // Κέρδη / Υπόλοιπα
     const grossProfit = (v) => {
       const tradeAdj = (v.sale?.tradeIn?.enabled? (parseNum(v.sale.tradeIn.valueOffered) - parseNum(v.sale.tradeIn.cashAdded)) : 0);
       return parseNum(v.sale?.price) + tradeAdj - parseNum(v.purchasePrice) - vehicleExpensesTotal(v.id);
@@ -96,34 +97,42 @@
     const outstandingCapital = (v)=> Math.max(0, capitalBasis(v) - collectedCapital(v));
     const outstandingProfit  = (v)=> Math.max(0, grossProfit(v) - collectedProfit(v));
 
-    // Κέρδη ιδιοκτήτη (εισπραχθέντα) για μήνα (cash mode)
-    const monthCollectedProfitForOwner = (yyyymm) => {
-      const ownerName = state.profile.ownerName || "Άγγελος";
-      return state.vehicles.reduce((sum,v)=>{
-        const tot = vehicleCommittedCapital(v);
-        const ownerCap = v.partners.find(p=>p.name===ownerName)?.capital||0;
-        const share = tot>0 ? ownerCap/tot : 1;
+    // Μερίδιο ιδιοκτήτη (βάσει αναλογίας κεφαλαίου στο όχημα)
+    const ownerShare = (v)=>{
+      const tot = vehicleCommittedCapital(v);
+      const own = v.partners.find(p=>p.name===ownerName)?.capital||0;
+      return tot>0 ? own/tot : 1;
+    };
+    const ownerCommittedInVehicle = (v)=> v.partners.find(p=>p.name===ownerName)?.capital || 0;
+    const ownerOutstandingCapital = (v)=> outstandingCapital(v) * ownerShare(v);
+    const ownerOutstandingProfit  = (v)=> outstandingProfit(v)  * ownerShare(v);
+
+    // Εισπραχθέν Κέρδος ιδιοκτήτη (μήνας - cash)
+    const monthCollectedProfitForOwner = (yyyymm) =>
+      state.vehicles.reduce((sum,v)=>{
+        const share = ownerShare(v);
         const collectedThisMonth = (v.sale?.collections||[])
           .filter(c=> c.type==="profit" && ym(c.date)===yyyymm)
           .reduce((a,b)=>a+parseNum(b.amount||0),0);
         return sum + collectedThisMonth * share;
       },0);
-    };
 
-    // Ελεύθερο Κεφάλαιο (Free Capital) = μόνο προσωπικό διαθέσιμο μη επενδεδυμένο
+    // Προσωπικό net (βάση + ledger)
+    const personalNet = state.capital.personal +
+      state.capital.ledger.reduce((s,l)=> s + (l.type==="in"? +1 : -1) * (l.amount||0), 0);
+
+    // Ελεύθερο Κεφάλαιο (Free) – παράγεται από το προσωπικό & κινήσεις
     const computeFreeCapital = () => {
-      let free = parseNum(state.capital.personal);
-      // ledger
-      state.capital.ledger.forEach(l=>{ free += (l.type==="in"? +1:-1) * parseNum(l.amount||0); });
-      // δεσμευμένο του Άγγελου σε οχήματα
+      let free = parseNum(personalNet);
+      // δεσμεύσεις Άγγελου σε οχήματα
       state.vehicles.forEach(v=>{
-        const ag = v.partners.find(p=>p.name==="Άγγελος");
+        const ag = v.partners.find(p=>p.name===ownerName);
         if(ag) free -= parseNum(ag.capital||0);
       });
       // overheads πληρωμένα από Άγγελο
-      paidOverheads.forEach(e=>{ if(e.whoPaid==="Άγγελος") free -= parseNum(e.amount||0); });
+      paidOverheads.forEach(e=>{ if(e.whoPaid===ownerName) free -= parseNum(e.amount||0); });
       // vehicle expenses (paid) από Άγγελο
-      state.expenses.filter(e=>e.type==="vehicle" && e.status==="paid" && e.whoPaid==="Άγγελος").forEach(e=> free -= parseNum(e.amount||0));
+      state.expenses.filter(e=>e.type==="vehicle" && e.status==="paid" && e.whoPaid===ownerName).forEach(e=> free -= parseNum(e.amount||0));
       // εισπράξεις προς Free ή Split (υπόλοιπο στο Free)
       state.vehicles.forEach(v=>{
         (v.sale?.collections||[]).forEach(c=>{
@@ -139,13 +148,19 @@
     };
     const freeCapital = computeFreeCapital();
 
-    // Actions
-    const addCapitalLedger = (entry) => setState(s=>({...s, capital:{...s.capital, ledger:[{id:uid(),...entry}, ...s.capital.ledger]}}));
+    // ===== ΝΕΟ: Συνολικό Προσωπικό Κεφάλαιο (Overview) =====
+    const totalOwnerCommitted = state.vehicles.reduce((s,v)=> s + ownerCommittedInVehicle(v), 0);
+    const totalOwnerOutstandingProfit = state.vehicles.reduce((s,v)=> s + ownerOutstandingProfit(v), 0);
+    const totalPersonalOverview = totalOwnerCommitted + freeCapital + totalOwnerOutstandingProfit;
+
+    // ===== Actions =====
+    const addCapitalLedger = (entry) =>
+      setState(s=>({...s, capital:{...s.capital, ledger:[{id:uid(),...entry}, ...s.capital.ledger]}}));
 
     const addVehicle = (v) => setState(s=>({...s, vehicles:[{
       id:uid(), title:v.title, vin:v.vin, purchasePrice:parseNum(v.purchasePrice), purchaseDate: v.purchaseDate||todayStr(),
       customerVehicle: !!v.customerVehicle, clientBudget: parseNum(v.clientBudget||0),
-      partners: v.partners?.length? v.partners.map(p=>({...p,capital:parseNum(p.capital)})) : [{name:"Άγγελος",capital:0}],
+      partners: v.partners?.length? v.partners.map(p=>({...p,capital:parseNum(p.capital)})) : [{name:ownerName,capital:0}],
       sale:{ price:0,date:"",settled:false,collections:[],tradeIn:{enabled:false,valueOffered:0,cashAdded:0,capitalCommitted:0,convertedVehicleId:null}}
     }, ...s.vehicles]}));
 
@@ -155,25 +170,25 @@
     const commitToVehicle   = (vid, amount) =>
       setState(s=>({...s, vehicles: s.vehicles.map(v=>{
         if(v.id!==vid) return v;
-        const idx=v.partners.findIndex(p=>p.name==="Άγγελος");
+        const idx=v.partners.findIndex(p=>p.name===ownerName);
         const partners=[...v.partners];
-        if(idx<0) partners.push({name:"Άγγελος",capital:0});
-        partners[idx<0?partners.length-1:idx] = {name:"Άγγελος", capital: parseNum((idx<0?0:partners[idx].capital)||0) + parseNum(amount)};
+        if(idx<0) partners.push({name:ownerName,capital:0});
+        partners[idx<0?partners.length-1:idx] = {name:ownerName, capital: parseNum((idx<0?0:partners[idx].capital)||0) + parseNum(amount)};
         return {...v, partners};
       })}));
 
     const releaseFromVehicle = (vid, amount) =>
       setState(s=>({...s, vehicles: s.vehicles.map(v=>{
         if(v.id!==vid) return v;
-        const partners = v.partners.map(p=> p.name!=="Άγγελος"? p : {...p, capital: Math.max(0, parseNum(p.capital||0)-parseNum(amount))});
+        const partners = v.partners.map(p=> p.name!==ownerName? p : {...p, capital: Math.max(0, parseNum(p.capital||0)-parseNum(amount))});
         return {...v, partners};
       })}));
 
     const addExpenseVehicle = (e) =>
-      setState(s=>({...s, expenses:[{id:uid(), type:"vehicle", vehicleId:e.vehicleId, amount:parseNum(e.amount), date:e.date||todayStr(), note:e.note, whoPaid:e.whoPaid||"Άγγελος", status:e.status||"unpaid"}, ...s.expenses]}));
+      setState(s=>({...s, expenses:[{id:uid(), type:"vehicle", vehicleId:e.vehicleId, amount:parseNum(e.amount), date:e.date||todayStr(), note:e.note, whoPaid:e.whoPaid||ownerName, status:e.status||"unpaid"}, ...s.expenses]}));
 
     const addOverhead = (e) =>
-      setState(s=>({...s, expenses:[{id:uid(), type:"overhead", category:e.category, amount:parseNum(e.amount), date:e.date||todayStr(), note:e.note, whoPaid:e.whoPaid||"Άγγελος", status:e.status||"unpaid", dueDate:e.dueDate||""}, ...s.expenses]}));
+      setState(s=>({...s, expenses:[{id:uid(), type:"overhead", category:e.category, amount:parseNum(e.amount), date:e.date||todayStr(), note:e.note, whoPaid:e.whoPaid||ownerName, status:e.status||"unpaid", dueDate:e.dueDate||""}, ...s.expenses]}));
 
     const markExpensePaid = (id) => setState(s=>({...s, expenses: s.expenses.map(x=> x.id===id? {...x, status:"paid"} : x)}));
     const deleteExpense   = (id) => setState(s=>({...s, expenses: s.expenses.filter(x=>x.id!==id)}));
@@ -183,7 +198,7 @@
         ...v, sale:{ ...v.sale, price:parseNum(sale.price), date: sale.date||todayStr(), settled: !!sale.settled, tradeIn: sale.tradeIn || v.sale.tradeIn }
       } : v)}));
 
-    // Είσπραξη: προορισμός free / vehicle / split (μέρος σε όχημα, υπόλοιπο free)
+    // Είσπραξη: προορισμός free / vehicle / split
     const addCollection = (vid, col) =>
       setState(s=>({...s, vehicles: s.vehicles.map(v=>{
         if(v.id!==vid) return v;
@@ -198,42 +213,83 @@
         return {...v, sale:{...v.sale, collections}};
       })}));
 
-    const toggleModal = (name=null, data=null) => setState(s=>({...s, ui:{modal:name, modalData:data}}));
+    // ΝΕΟ: Διαγραφή με RETURN ή WIPE
+    const removeVehicle = (vid) => {
+      const v = getVehicle(vid);
+      if(!v) return;
+      const agCommitted = (v.partners.find(p=>p.name===ownerName)?.capital || 0);
+      const msg =
+`Διαγραφή οχήματος: ${v.title}
 
-    // Exports
-    const exportJSON = () => { const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`CenterCar-V21-${todayStr()}.json`; a.click(); URL.revokeObjectURL(url); };
+Πληκτρολόγησε:
+- RETURN  → Επιστροφή δεσμευμένου κεφαλαίου στο Ελεύθερο (Free)
+- WIPE    → Πλήρης διαγραφή ΧΩΡΙΣ επιστροφή
+
+(Ακύρωση για έξοδο)`;
+      const choice = prompt(msg, "RETURN or WIPE");
+      if(!choice) return;
+      const norm = choice.trim().toLowerCase();
+      if (norm.startsWith("wipe")) {
+        setState(s=>({
+          ...s,
+          capital: {
+            ...s.capital,
+            ledger: [
+              { id: uid(), date: todayStr(), type: "out", amount: agCommitted, note: `Wipe όχημα: ${v.title} (χωρίς επιστροφή)` },
+              ...s.capital.ledger
+            ]
+          },
+          vehicles: s.vehicles.filter(x=>x.id!==vid),
+          expenses: s.expenses.filter(e=> !(e.type==="vehicle" && e.vehicleId===vid))
+        }));
+      } else {
+        setState(s=>({
+          ...s,
+          vehicles: s.vehicles.filter(x=>x.id!==vid),
+          expenses: s.expenses.filter(e=> !(e.type==="vehicle" && e.vehicleId===vid))
+        }));
+      }
+    };
+
+    // ===== UI helpers =====
+    const toggleModal = (name=null, data=null) => setState(s=>({...s, ui:{modal:name, modalData:data}}));
+    const exportJSON = () => { const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`CenterCar-V22-${todayStr()}.json`; a.click(); URL.revokeObjectURL(url); };
     const importJSON = (file) => { if(!file) return; const r=new FileReader(); r.onload=()=>{ try{setState(JSON.parse(r.result));}catch{alert("Μη έγκυρο JSON");}}; r.readAsText(file); };
     const exportPDF = () => {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({unit:"pt", format:"a4"});
-      const m=36; let y=m;
-      doc.setFontSize(16); doc.text(`Center Car – Αναφορά (${new Date().toLocaleDateString("el-GR")})`, m,y); y+=18;
-      doc.setFontSize(10);
-      doc.autoTable({ startY:y+6, head:[["Πεδίο","Τιμή"]], body:[
-        ["Προσωπικό Κεφάλαιο (Personal)", `€ ${fmt(state.capital.personal)}`],
-        ["Ελεύθερο Κεφάλαιο (Free Capital)", `€ ${fmt(freeCapital)}`],
-        ["Επένδυση Μαγαζιού (Shop Investment, committed όλων)", `€ ${fmt(totalCommittedAllPartners)}`],
-        ["Οχήματα σε Στοκ (Stock)", String(state.vehicles.filter(v=>!v.sale?.settled).length)]
-      ], theme:"grid", styles:{fontSize:9}, headStyles:{fillColor:[230,230,230]}, margin:{left:m,right:m} });
+      const { jsPDF } = window.jspdf; const doc = new jsPDF({unit:"pt", format:"a4"}); const m=36; let y=m;
+      doc.setFontSize(16); doc.text(`Center Car – Αναφορά (${new Date().toLocaleDateString("el-GR")})`, m,y); y+=18; doc.setFontSize(10);
+      doc.autoTable({
+        startY:y+6, head:[["Πεδίο","Τιμή"]],
+        body:[
+          ["Προσωπικό Κεφάλαιο (net)", `€ ${fmt(personalNet)}`],
+          ["Ελεύθερο Κεφάλαιο (Free)", `€ ${fmt(freeCapital)}`],
+          ["Δεσμευμένο Άγγελου σε οχήματα", `€ ${fmt(totalOwnerCommitted)}`],
+          ["Αναμενόμενο Κέρδος (owner share)", `€ ${fmt(totalOwnerOutstandingProfit)}`],
+          ["Συνολικό Προσωπικό Κεφάλαιο (Overview)", `€ ${fmt(totalPersonalOverview)}`],
+          ["Επένδυση Μαγαζιού (committed όλων)", `€ ${fmt(totalCommittedAllPartners)}`],
+        ],
+        theme:"grid", styles:{fontSize:9}, headStyles:{fillColor:[230,230,230]}, margin:{left:m,right:m}
+      });
       doc.save(`CenterCar-Report-${todayStr()}.pdf`);
     };
 
-    // Form state
-    const [formV, setFormV] = useState({title:"",vin:"",purchasePrice:"",purchaseDate:"",customerVehicle:false,clientBudget:"", partners:[{name:"Άγγελος", capital:0}]});
-    const [formVehExp,setFormVehExp]=useState({vehicleId:"",amount:"",date:"",note:"",whoPaid:"Άγγελος",status:"unpaid"});
-    const [formOver,setFormOver]=useState({category:"shop",amount:"",date:"",note:"",whoPaid:"Άγγελος",status:"unpaid",dueDate:""});
+    // ===== Forms state =====
+    const [formV, setFormV] = useState({title:"",vin:"",purchasePrice:"",purchaseDate:"",customerVehicle:false,clientBudget:"", partners:[{name:ownerName, capital:0}]});
+    const [formVehExp,setFormVehExp]=useState({vehicleId:"",amount:"",date:"",note:"",whoPaid:ownerName,status:"unpaid"});
+    const [formOver,setFormOver]=useState({category:"shop",amount:"",date:"",note:"",whoPaid:ownerName,status:"unpaid",dueDate:""});
     const [formCommit,setFormCommit]=useState({vehicleId:"",amount:""});
     const [formRelease,setFormRelease]=useState({vehicleId:"",amount:""});
     const [formSale,setFormSale]=useState({vehicleId:"",price:"",date:"",settled:false, tradeIn:{enabled:false,valueOffered:"",cashAdded:"",capitalCommitted:""}});
     const [formCollect,setFormCollect]=useState({vehicleId:"",type:"profit",amount:"",date:"",destination:{type:"free",vehicleId:"",toVehicleAmount:""}});
     const collaborators = state.profile.collaborators;
 
+    // ===== Render =====
     return (
       <div>
         <header>
           <div className="container row" style={{justifyContent:"space-between"}}>
             <div className="row">
-              <div className="title" style={{fontSize:20}}>Center Car • V2.1</div>
+              <div className="title" style={{fontSize:20}}>Center Car • V2.2</div>
               <span className="pill">Ελληνικά <small className="eng">(Greek UI)</small></span>
             </div>
             <div className="row">
@@ -245,7 +301,7 @@
             </div>
           </div>
 
-          <div className="container row tabs" style={{marginBottom:8}}>
+          <div className="container row tabs" style={{margin-bottom:8px;marginBottom:8}}>
             {[
               ["dashboard","Πίνακας Ελέγχου","Dashboard"],
               ["vehicles","Οχήματα","Vehicles"],
@@ -266,40 +322,28 @@
           {tab==="dashboard" && (
             <section className="grid">
               <div className="grid grid4">
-                <CardStat label={<>Προσωπικό Κεφάλαιο <small className="eng">(Personal Capital)</small></>} value={`€ ${fmt(state.capital.personal)}`} />
+                <CardStat label={<>Προσωπικό Κεφάλαιο (net) <small className="eng">(Personal)</small></>} value={`€ ${fmt(personalNet)}`} />
                 <CardStat label={<>Ελεύθερο Κεφάλαιο <small className="eng">(Free Capital)</small></>} value={`€ ${fmt(freeCapital)}`} />
-                <CardStat label={<>Επένδυση Μαγαζιού <small className="eng">(Shop Investment, committed όλων)</small></>} value={`€ ${fmt(totalCommittedAllPartners)}`} />
-                <CardStat label={<>Απλήρωτα Γενικά Έξοδα <small className="eng">(Unpaid Overheads)</small></>} value={`€ ${fmt(unpaidOverheads.reduce((a,b)=>a+parseNum(b.amount||0),0))}`} />
+                <CardStat label={<>Δεσμευμένο Άγγελου σε οχήματα <small className="eng">(Owner committed)</small></>} value={`€ ${fmt(totalOwnerCommitted)}`} />
+                <CardStat label={<>Αναμενόμενο Κέρδος Άγγελου <small className="eng">(Outstanding Profit)</small></>} value={`€ ${fmt(totalOwnerOutstandingProfit)}`} />
               </div>
 
-              <div className="grid grid3">
-                {["shop","home","personal"].map(cat=>(
-                  <div className="card" key={cat}>
-                    <div className="title">
-                      {cat==="shop" && <>Μαγαζί <small className="eng">(Shop)</small> — Γενικά Έξοδα <small className="eng">(Overhead)</small></>}
-                      {cat==="home" && <>Σπίτι <small className="eng">(Home)</small> — Γενικά Έξοδα <small className="eng">(Overhead)</small></>}
-                      {cat==="personal" && <>Προσωπικά <small className="eng">(Personal)</small> — Γενικά Έξοδα <small className="eng">(Overhead)</small></>}
-                    </div>
-                    <div className="row">
-                      <input type="number" placeholder="Ποσό" value={formOver.amount} onChange={e=>setFormOver({...formOver, amount:e.target.value})}/>
-                      <input type="date" value={formOver.date} onChange={e=>setFormOver({...formOver, date:e.target.value})}/>
-                      <select value={formOver.whoPaid} onChange={e=>setFormOver({...formOver, whoPaid:e.target.value})}>
-                        {collaborators.map(n=><option key={n}>{n}</option>)}
-                      </select>
-                    </div>
-                    <input placeholder="Σημείωση" value={formOver.note} onChange={e=>setFormOver({...formOver, note:e.target.value})} style={{width:"100%"}}/>
-                    <div className="row" style={{marginTop:6}}>
-                      <select value={formOver.status} onChange={e=>setFormOver({...formOver,status:e.target.value})}>
-                        <option value="unpaid">Απλήρωτο (Unpaid)</option>
-                        <option value="paid">Εξοφλημένο (Paid)</option>
-                      </select>
-                      <input type="date" value={formOver.dueDate} onChange={e=>setFormOver({...formOver,dueDate:e.target.value})} placeholder="Ημ/νία λήξης (Due)"/>
-                      <button className="btn primary" onClick={()=>{ addOverhead({...formOver, category:cat}); setFormOver({...formOver, amount:"", note:""}); }}>
-                        Καταχώριση <small className="eng">(Add)</small>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+              <div className="card">
+                <div className="title">Συνολικό Προσωπικό Κεφάλαιο <small className="eng">(Total Personal Overview)</small></div>
+                <div style={{fontSize:24,fontWeight:700}}>€ {fmt(totalPersonalOverview)}</div>
+                <div className="muted">= Δεσμευμένο Άγγελου + Free + Αναμενόμενο Κέρδος (owner share)</div>
+                <div className="row" style={{marginTop:8}}>
+                  <button className="btn" onClick={()=>{
+                    alert(
+`Ανάλυση:
+Δεσμευμένο Άγγελου: € ${fmt(totalOwnerCommitted)}
+Ελεύθερο (Free): € ${fmt(freeCapital)}
+Αναμενόμενο Κέρδος (owner share): € ${fmt(totalOwnerOutstandingProfit)}
+-----------------------------------------
+Σύνολο: € ${fmt(totalPersonalOverview)}`
+                    );
+                  }}>Δείξε ανάλυση <small className="eng">(Breakdown)</small></button>
+                </div>
               </div>
 
               <div className="card">
@@ -307,13 +351,14 @@
                 <table>
                   <thead>
                     <tr>
-                      <th>Όχημα <small className="eng">(Vehicle)</small></th>
-                      <th>Αγορά <small className="eng">(Purchase)</small></th>
-                      <th>Δεσμευμένο Κεφάλαιο <small className="eng">(Committed)</small></th>
-                      <th>Έξοδα <small className="eng">(Expenses)</small></th>
-                      <th>Πελάτης <small className="eng">(Customer)</small></th>
-                      <th>Πώληση <small className="eng">(Sale)</small></th>
-                      <th>Δράσεις <small className="eng">(Actions)</small></th>
+                      <th>Όχημα</th>
+                      <th>Αγορά</th>
+                      <th>Δεσμευμένο</th>
+                      <th>Έξοδα</th>
+                      <th>Υπ. Κεφαλαίου (Owner)</th>
+                      <th>Υπ. Κέρδους (Owner)</th>
+                      <th>Πώληση</th>
+                      <th>Δράσεις</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -323,13 +368,15 @@
                         <td>€ {fmt(v.purchasePrice)}<div className="muted">{v.purchaseDate}</div></td>
                         <td>€ {fmt(vehicleCommittedCapital(v))}</td>
                         <td>€ {fmt(vehicleExpensesTotal(v.id))}</td>
-                        <td>{v.customerVehicle? <>ΝΑΙ <small className="eng">(YES)</small><div className="muted">Προϋπ.: € {fmt(v.clientBudget||0)}</div></> : "ΟΧΙ"}</td>
+                        <td>€ {fmt(ownerOutstandingCapital(v))}</td>
+                        <td>€ {fmt(ownerOutstandingProfit(v))}</td>
                         <td>{v.sale?.price? <>€ {fmt(v.sale.price)}<div className="muted">{v.sale.date}</div></> : "—"}</td>
                         <td className="row">
-                          <button className="btn" onClick={()=>toggleModal("vehicleExpenses",{vehicleId:v.id})}>Έξοδα <small className="eng">(Expenses)</small></button>
-                          <button className="btn" onClick={()=>toggleModal("partners",{vehicleId:v.id})}>Συνεργάτες <small className="eng">(Partners)</small></button>
-                          <button className="btn" onClick={()=>toggleModal("sell",{vehicleId:v.id})}>Πώληση <small className="eng">(Sell)</small></button>
-                          <button className="btn" onClick={()=>toggleModal("collect",{vehicleId:v.id})}>Είσπραξη <small className="eng">(Collect)</small></button>
+                          <button className="btn" onClick={()=>toggleModal("vehicleExpenses",{vehicleId:v.id})}>Έξοδα</button>
+                          <button className="btn" onClick={()=>toggleModal("partners",{vehicleId:v.id})}>Συνεργάτες</button>
+                          <button className="btn" onClick={()=>toggleModal("sell",{vehicleId:v.id})}>Πώληση</button>
+                          <button className="btn" onClick={()=>toggleModal("collect",{vehicleId:v.id})}>Είσπραξη</button>
+                          <button className="btn red" onClick={()=>removeVehicle(v.id)}>Διαγραφή</button>
                         </td>
                       </tr>
                     ))}
@@ -342,58 +389,58 @@
           {tab==="vehicles" && (
             <section className="grid">
               <div className="card">
-                <div className="title">+ Προσθήκη Οχήματος <small className="eng">(Add Vehicle)</small></div>
+                <div className="title">+ Προσθήκη Οχήματος</div>
                 <div className="grid grid4">
-                  <input placeholder="Μοντέλο/Τίτλος (Model/Title)" value={formV.title} onChange={e=>setFormV({...formV,title:e.target.value})}/>
+                  <input placeholder="Μοντέλο/Τίτλος" value={formV.title} onChange={e=>setFormV({...formV,title:e.target.value})}/>
                   <input placeholder="Πλαίσιο (VIN)" value={formV.vin} onChange={e=>setFormV({...formV,vin:e.target.value})}/>
-                  <input type="number" placeholder="Τιμή Αγοράς (Purchase Price)" value={formV.purchasePrice} onChange={e=>setFormV({...formV,purchasePrice:e.target.value})}/>
+                  <input type="number" placeholder="Τιμή Αγοράς" value={formV.purchasePrice} onChange={e=>setFormV({...formV,purchasePrice:e.target.value})}/>
                   <input type="date" value={formV.purchaseDate} onChange={e=>setFormV({...formV,purchaseDate:e.target.value})}/>
                 </div>
                 <div className="row" style={{marginTop:8}}>
-                  <label><input type="checkbox" checked={!!formV.customerVehicle} onChange={e=>setFormV({...formV,customerVehicle:e.target.checked})}/> Όχημα Πελάτη <small className="eng">(Customer Vehicle)</small></label>
-                  {formV.customerVehicle && (<input type="number" placeholder="Προϋπολογισμός Πελάτη (Client Budget)" value={formV.clientBudget} onChange={e=>setFormV({...formV,clientBudget:e.target.value})}/>)}
+                  <label><input type="checkbox" checked={!!formV.customerVehicle} onChange={e=>setFormV({...formV,customerVehicle:e.target.checked})}/> Όχημα Πελάτη</label>
+                  {formV.customerVehicle && (<input type="number" placeholder="Προϋπολογισμός Πελάτη" value={formV.clientBudget} onChange={e=>setFormV({...formV,clientBudget:e.target.value})}/>)}
                 </div>
                 <div className="card" style={{marginTop:8}}>
-                  <div className="title">Συνεργάτες & Κεφάλαιο <small className="eng">(Partners & Capital)</small></div>
+                  <div className="title">Συνεργάτες & Κεφάλαιο</div>
                   {formV.partners.map((p,i)=>(
                     <div key={i} className="row" style={{marginTop:6}}>
                       <select value={p.name} onChange={e=>{ const partners=[...formV.partners]; partners[i]={...partners[i], name:e.target.value}; setFormV({...formV,partners}); }}>
                         {collaborators.map(n=><option key={n}>{n}</option>)}
                       </select>
-                      <input type="number" placeholder="Κεφάλαιο (Capital)" value={p.capital} onChange={e=>{ const partners=[...formV.partners]; partners[i]={...partners[i], capital:e.target.value}; setFormV({...formV,partners}); }}/>
-                      <button className="btn" onClick={()=>setFormV({...formV, partners: formV.partners.filter((_,j)=>j!==i)})}>Αφαίρεση <small className="eng">(Remove)</small></button>
+                      <input type="number" placeholder="Κεφάλαιο" value={p.capital} onChange={e=>{ const partners=[...formV.partners]; partners[i]={...partners[i], capital:e.target.value}; setFormV({...formV,partners}); }}/>
+                      <button className="btn" onClick={()=>setFormV({...formV, partners: formV.partners.filter((_,j)=>j!==i)})}>Αφαίρεση</button>
                     </div>
                   ))}
-                  <button className="btn" style={{marginTop:6}} onClick={()=>setFormV({...formV, partners:[...formV.partners,{name:"Άγγελος",capital:0}]})}>+ Συνεργάτης <small className="eng">(Add Partner)</small></button>
+                  <button className="btn" style={{marginTop:6}} onClick={()=>setFormV({...formV, partners:[...formV.partners,{name:ownerName,capital:0}]})}>+ Συνεργάτης</button>
                 </div>
                 <div style={{marginTop:8}}>
-                  <button className="btn primary" onClick={()=>{ addVehicle(formV); setFormV({title:"",vin:"",purchasePrice:"",purchaseDate:"",customerVehicle:false,clientBudget:"",partners:[{name:"Άγγελος",capital:0}]}); }}>
-                    Προσθήκη <small className="eng">(Add)</small>
-                  </button>
+                  <button className="btn primary" onClick={()=>{ addVehicle(formV); setFormV({title:"",vin:"",purchasePrice:"",purchaseDate:"",customerVehicle:false,clientBudget:"",partners:[{name:ownerName,capital:0}]}); }}>Προσθήκη</button>
                 </div>
               </div>
 
               <div className="grid grid2">
                 <div className="card">
-                  <div className="title">+ Δέσμευση σε Όχημα <small className="eng">(Commit to Vehicle)</small></div>
-                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>commitToVehicle(vid,amt)} label="Δέσμευση (Commit)"/>
+                  <div className="title">+ Δέσμευση σε Όχημα (Commit)</div>
+                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>commitToVehicle(vid,amt)} label="Δέσμευση"/>
                 </div>
                 <div className="card">
-                  <div className="title">+ Αποδέσμευση από Όχημα <small className="eng">(Release from Vehicle)</small></div>
-                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>releaseFromVehicle(vid,amt)} label="Αποδέσμευση (Release)"/>
+                  <div className="title">+ Αποδέσμευση από Όχημα (Release)</div>
+                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>releaseFromVehicle(vid,amt)} label="Αποδέσμευση"/>
                 </div>
               </div>
 
               <div className="card">
-                <div className="title">Όλα τα Οχήματα <small className="eng">(All Vehicles)</small></div>
+                <div className="title">Όλα τα Οχήματα</div>
                 <table>
                   <thead><tr>
-                    <th>Όχημα <small className="eng">(Vehicle)</small></th>
-                    <th>Συνεργάτες (Κεφάλαιο) <small className="eng">(Partners)</small></th>
-                    <th>Δεσμευμένο <small className="eng">(Committed)</small></th>
-                    <th>Έξοδα <small className="eng">(Expenses)</small></th>
-                    <th>Πώληση <small className="eng">(Sale)</small></th>
-                    <th>Δράσεις <small className="eng">(Actions)</small></th>
+                    <th>Όχημα</th>
+                    <th>Συνεργάτες (Κεφάλαιο)</th>
+                    <th>Δεσμευμένο</th>
+                    <th>Έξοδα</th>
+                    <th>Υπ. Κεφαλαίου (Owner)</th>
+                    <th>Υπ. Κέρδους (Owner)</th>
+                    <th>Πώληση</th>
+                    <th>Δράσεις</th>
                   </tr></thead>
                   <tbody>
                     {state.vehicles.map(v=>(
@@ -402,12 +449,15 @@
                         <td>{v.partners.map(p=><div key={p.name}>{p.name}: € {fmt(p.capital||0)}</div>)}</td>
                         <td>€ {fmt(vehicleCommittedCapital(v))}</td>
                         <td>€ {fmt(vehicleExpensesTotal(v.id))}</td>
+                        <td>€ {fmt(ownerOutstandingCapital(v))}</td>
+                        <td>€ {fmt(ownerOutstandingProfit(v))}</td>
                         <td>{v.sale?.price? <>€ {fmt(v.sale.price)}<div className="muted">{v.sale.date}</div></> : "—"}</td>
                         <td className="row">
                           <button className="btn" onClick={()=>toggleModal("vehicleExpenses",{vehicleId:v.id})}>Έξοδα</button>
                           <button className="btn" onClick={()=>toggleModal("partners",{vehicleId:v.id})}>Συνεργάτες</button>
                           <button className="btn" onClick={()=>toggleModal("sell",{vehicleId:v.id})}>Πώληση</button>
                           <button className="btn" onClick={()=>toggleModal("collect",{vehicleId:v.id})}>Είσπραξη</button>
+                          <button className="btn red" onClick={()=>removeVehicle(v.id)}>Διαγραφή</button>
                         </td>
                       </tr>
                     ))}
@@ -420,44 +470,42 @@
           {tab==="expenses" && (
             <section className="grid">
               <div className="card">
-                <div className="title">+ Έξοδο Οχήματος <small className="eng">(Vehicle Expense)</small></div>
+                <div className="title">+ Έξοδο Οχήματος</div>
                 <div className="row">
                   <select value={formVehExp.vehicleId} onChange={e=>setFormVehExp({...formVehExp,vehicleId:e.target.value})}>
-                    <option value="">— Επίλεξε Όχημα (Select Vehicle) —</option>
+                    <option value="">— Επίλεξε Όχημα —</option>
                     {state.vehicles.map(v=><option key={v.id} value={v.id}>{v.title}</option>)}
                   </select>
-                  <input type="number" placeholder="Ποσό (Amount)" value={formVehExp.amount} onChange={e=>setFormVehExp({...formVehExp,amount:e.target.value})}/>
+                  <input type="number" placeholder="Ποσό" value={formVehExp.amount} onChange={e=>setFormVehExp({...formVehExp,amount:e.target.value})}/>
                   <input type="date" value={formVehExp.date} onChange={e=>setFormVehExp({...formVehExp,date:e.target.value})}/>
                   <select value={formVehExp.whoPaid} onChange={e=>setFormVehExp({...formVehExp,whoPaid:e.target.value})}>
                     {collaborators.map(n=><option key={n}>{n}</option>)}
                   </select>
                   <select value={formVehExp.status} onChange={e=>setFormVehExp({...formVehExp,status:e.target.value})}>
-                    <option value="unpaid">Απλήρωτο (Unpaid)</option>
-                    <option value="paid">Εξοφλημένο (Paid)</option>
+                    <option value="unpaid">Απλήρωτο</option>
+                    <option value="paid">Εξοφλημένο</option>
                   </select>
-                  <input placeholder="Σημείωση (Note)" value={formVehExp.note} onChange={e=>setFormVehExp({...formVehExp,note:e.target.value})}/>
-                  <button className="btn primary" onClick={()=>{ if(formVehExp.vehicleId && parseNum(formVehExp.amount)>0){ addExpenseVehicle(formVehExp); setFormVehExp({...formVehExp, vehicleId:"", amount:"", note:""}); } }}>
-                    Καταχώριση (Add)
-                  </button>
+                  <input placeholder="Σημείωση" value={formVehExp.note} onChange={e=>setFormVehExp({...formVehExp,note:e.target.value})}/>
+                  <button className="btn primary" onClick={()=>{ if(formVehExp.vehicleId && parseNum(formVehExp.amount)>0){ addExpenseVehicle(formVehExp); setFormVehExp({...formVehExp, vehicleId:"", amount:"", note:""}); } }}>Καταχώριση</button>
                 </div>
               </div>
 
               <div className="grid grid2">
                 <div className="card">
-                  <div className="title">Γενικά Έξοδα <small className="eng">(Overheads)</small></div>
+                  <div className="title">Γενικά Έξοδα</div>
                   <table>
                     <thead><tr>
-                      <th>Ημ/νία (Date)</th><th>Κατηγορία (Category)</th><th>Ποιος (Who Paid)</th><th>Ποσό (Amount)</th><th>Σημ. (Note)</th><th>Κατάσταση (Status)</th><th></th>
+                      <th>Ημ/νία</th><th>Κατηγορία</th><th>Ποιος</th><th>Ποσό</th><th>Σημ.</th><th>Κατάσταση</th><th></th>
                     </tr></thead>
                     <tbody>
                       {state.expenses.filter(e=>e.type==="overhead").map(e=>(
                         <tr key={e.id}>
                           <td>{e.date}</td><td>{e.category}</td><td>{e.whoPaid}</td>
                           <td>€ {fmt(e.amount)}</td><td>{e.note}</td>
-                          <td>{e.status==="paid"? <span className="ok">Εξοφλημένο (Paid)</span> : <span className="danger">Απλήρωτο (Unpaid)</span>}</td>
+                          <td>{e.status==="paid"? <span className="ok">Εξοφλημένο</span> : <span className="danger">Απλήρωτο</span>}</td>
                           <td className="row">
-                            {e.status!=="paid" && <button className="btn" onClick={()=>markExpensePaid(e.id)}>Εξόφληση (Mark paid)</button>}
-                            <button className="btn" onClick={()=>deleteExpense(e.id)}>Διαγραφή (Delete)</button>
+                            {e.status!=="paid" && <button className="btn" onClick={()=>markExpensePaid(e.id)}>Εξόφληση</button>}
+                            <button className="btn" onClick={()=>deleteExpense(e.id)}>Διαγραφή</button>
                           </td>
                         </tr>
                       ))}
@@ -466,7 +514,7 @@
                 </div>
 
                 <div className="card">
-                  <div className="title">Έξοδα Οχημάτων <small className="eng">(Vehicle Expenses)</small></div>
+                  <div className="title">Έξοδα Οχημάτων</div>
                   <table>
                     <thead><tr>
                       <th>Ημ/νία</th><th>Όχημα</th><th>Ποιος</th><th>Ποσό</th><th>Σημείωση</th><th>Κατάσταση</th><th></th>
@@ -495,27 +543,45 @@
 
           {tab==="capital" && (
             <section className="grid">
-              <div className="grid grid3">
-                <CardStat label={<>Προσωπικό Κεφάλαιο <small className="eng">(Personal)</small></>} value={`€ ${fmt(state.capital.personal)}`} />
-                <CardStat label={<>Ελεύθερο Κεφάλαιο <small className="eng">(Free Capital)</small></>} value={`€ ${fmt(freeCapital)}`} />
-                <CardStat label={<>Επένδυση Μαγαζιού <small className="eng">(Shop Investment, committed όλων)</small></>} value={`€ ${fmt(totalCommittedAllPartners)}`} />
+              <div className="grid grid4">
+                <CardStat label="Προσωπικό Κεφάλαιο (net)" value={`€ ${fmt(personalNet)}`} />
+                <CardStat label="Ελεύθερο Κεφάλαιο (Free)" value={`€ ${fmt(freeCapital)}`} />
+                <CardStat label="Δεσμευμένο Άγγελου" value={`€ ${fmt(totalOwnerCommitted)}`} />
+                <CardStat label="Αναμενόμενο Κέρδος (owner share)" value={`€ ${fmt(totalOwnerOutstandingProfit)}`} />
               </div>
 
               <div className="card">
-                <div className="title">+ Κίνηση Προσωπικού Κεφαλαίου <small className="eng">(Personal Capital Ledger)</small></div>
-                <CapitalLedgerForm onAdd={(f)=>addCapitalLedger({date:f.date||todayStr(), type:f.type, amount:parseNum(f.amount), note:f.note})} />
-                <div className="muted" style={{marginTop:8}}>Δεσμεύσεις/Αποδεσμεύσεις, εξοφλήσεις & εισπράξεις επηρεάζουν έμμεσα το Ελεύθερο Κεφάλαιο.</div>
+                <div className="title">+ Κίνηση Προσωπικού Κεφαλαίου</div>
+                <CapitalLedgerForm onAdd={(f)=>addCapitalLedger({date:f.date||todayStr(), type:f.type, amount:parseNum(f.amount), note:(f.dest==="free" ? "[to Free] " : "[to Personal] ")+(f.note||"")})} />
+                <div className="muted" style={{marginTop:8}}>
+                  * «Μεταφορά από Free σε Προσωπικό» είναι ετικέτα για να θυμάσαι προορισμό• το Free υπολογίζεται από το Προσωπικό και τις κινήσεις.
+                </div>
               </div>
 
               <div className="grid grid2">
                 <div className="card">
-                  <div className="title">+ Δέσμευση σε Όχημα <small className="eng">(Commit)</small></div>
-                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>commitToVehicle(vid,amt)} label="Δέσμευση (Commit)"/>
+                  <div className="title">+ Δέσμευση σε Όχημα</div>
+                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>commitToVehicle(vid,amt)} label="Δέσμευση"/>
                 </div>
                 <div className="card">
-                  <div className="title">+ Αποδέσμευση από Όχημα <small className="eng">(Release)</small></div>
-                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>releaseFromVehicle(vid,amt)} label="Αποδέσμευση (Release)"/>
+                  <div className="title">+ Αποδέσμευση από Όχημα</div>
+                  <CommitReleaseForm vehicles={state.vehicles} onCommit={(vid,amt)=>releaseFromVehicle(vid,amt)} label="Αποδέσμευση"/>
                 </div>
+              </div>
+
+              <div className="card">
+                <div className="title">Συνολικό Προσωπικό Κεφάλαιο (Overview)</div>
+                <div style={{fontSize:24,fontWeight:700}}>€ {fmt(totalPersonalOverview)}</div>
+                <button className="btn" style={{marginTop:8}} onClick={()=>{
+                  alert(
+`Ανάλυση:
+Δεσμευμένο Άγγελου: € ${fmt(totalOwnerCommitted)}
+Ελεύθερο (Free): € ${fmt(freeCapital)}
+Αναμενόμενο Κέρδος (owner share): € ${fmt(totalOwnerOutstandingProfit)}
+-----------------------------------------
+Σύνολο: € ${fmt(totalPersonalOverview)}`
+                  );
+                }}>Δείξε ανάλυση</button>
               </div>
             </section>
           )}
@@ -523,16 +589,16 @@
           {tab==="reports" && (
             <section className="grid">
               <div className="card">
-                <div className="title">Μηνιαία Αναφορά <small className="eng">(Monthly Report)</small></div>
+                <div className="title">Μηνιαία Αναφορά</div>
                 <div className="row"><input type="month" value={reportMonth} onChange={e=>setReportMonth(e.target.value)} /></div>
                 <div className="grid grid2" style={{marginTop:8}}>
                   <div className="card">
-                    <div className="title">Εισπραχθέν Κέρδος Ιδιοκτήτη <small className="eng">(Collected Profit, Owner)</small></div>
+                    <div className="title">Εισπραχθέν Κέρδος Ιδιοκτήτη (cash)</div>
                     <div style={{fontSize:24}}>€ {fmt(monthCollectedProfitForOwner(reportMonth))}</div>
-                    <div className="muted">Με βάση το μερίδιο κεφαλαίου του Άγγελου (αναλογία σε κάθε όχημα).</div>
+                    <div className="muted">Υπολογίζεται με βάση την αναλογία κεφαλαίου του Άγγελου σε κάθε όχημα.</div>
                   </div>
                   <div className="card">
-                    <div className="title">Overheads του μήνα <small className="eng">(Monthly Overheads)</small></div>
+                    <div className="title">Overheads του μήνα</div>
                     <table>
                       <thead><tr><th>Ημ/νία</th><th>Κατηγορία</th><th>Ποιος</th><th>Ποσό</th><th>Κατάσταση</th></tr></thead>
                       <tbody>
@@ -550,10 +616,10 @@
           {tab==="sold" && (
             <section className="grid">
               <div className="card">
-                <div className="title">Πωλημένα Οχήματα <small className="eng">(Sold Vehicles)</small></div>
+                <div className="title">Πωλημένα Οχήματα (Αρχείο)</div>
                 <table>
                   <thead><tr>
-                    <th>Όχημα</th><th>Αγορά</th><th>Έξοδα</th><th>Πώληση</th><th>Μικτό</th><th>Υπόλοιπο <small className="eng">(Outstanding)</small></th>
+                    <th>Όχημα</th><th>Αγορά</th><th>Έξοδα</th><th>Πώληση</th><th>Μικτό</th><th>Υπόλοιπο</th>
                   </tr></thead>
                   <tbody>
                     {state.vehicles.filter(v=>v.sale?.price>0).map(v=>{
@@ -579,10 +645,10 @@
           {tab==="settings" && (
             <section className="grid">
               <div className="card">
-                <div className="title">Προφίλ <small className="eng">(Profile)</small></div>
+                <div className="title">Προφίλ</div>
                 <div className="row" style={{marginTop:8}}>
-                  <input value={state.profile.ownerName} onChange={e=>setState({...state, profile:{...state.profile, ownerName:e.target.value}})} placeholder="Όνομα Ιδιοκτήτη (Owner Name)"/>
-                  <input type="number" value={state.profile.weeklyPersonalCap} onChange={e=>setState({...state, profile:{...state.profile, weeklyPersonalCap: parseNum(e.target.value)}})} placeholder="Εβδομ. Όριο Προσωπικών (Weekly Cap)"/>
+                  <input value={state.profile.ownerName} onChange={e=>setState({...state, profile:{...state.profile, ownerName:e.target.value}})} placeholder="Όνομα Ιδιοκτήτη"/>
+                  <input type="number" value={state.profile.weeklyPersonalCap} onChange={e=>setState({...state, profile:{...state.profile, weeklyPersonalCap: parseNum(e.target.value)}})} placeholder="Εβδομ. Όριο Προσωπικών"/>
                   <select value={state.profile.reportMode} onChange={e=>setState({...state, profile:{...state.profile, reportMode:e.target.value}})}>
                     <option value="cash">Μετρητά (Cash)</option>
                     <option value="accrual">Λογιστική (Accrual)</option>
@@ -590,11 +656,11 @@
                 </div>
               </div>
               <div className="card">
-                <div className="title">Συνεργάτες <small className="eng">(Collaborators)</small></div>
+                <div className="title">Συνεργάτες</div>
                 <div className="row" style={{marginTop:8}}>{state.profile.collaborators.map((n,i)=><span key={i} className="pill">{n}</span>)}</div>
                 <div className="row" style={{marginTop:8}}>
-                  <button className="btn" onClick={()=>{ const n=prompt("Νέος συνεργάτης:"); if(n) setState({...state, profile:{...state.profile, collaborators:[...state.profile.collaborators, n]}}); }}>+ Προσθήκη (Add)</button>
-                  <button className="btn" onClick={()=>{ const n=prompt("Αφαίρεση ποίου;"); if(!n) return; setState({...state, profile:{...state.profile, collaborators: state.profile.collaborators.filter(x=>x!==n)}}); }}>− Αφαίρεση (Remove)</button>
+                  <button className="btn" onClick={()=>{ const n=prompt("Νέος συνεργάτης:"); if(n) setState({...state, profile:{...state.profile, collaborators:[...state.profile.collaborators, n]}}); }}>+ Προσθήκη</button>
+                  <button className="btn" onClick={()=>{ const n=prompt("Αφαίρεση ποίου;"); if(!n) return; setState({...state, profile:{...state.profile, collaborators: state.profile.collaborators.filter(x=>x!==n)}}); }}>− Αφαίρεση</button>
                 </div>
               </div>
             </section>
@@ -618,7 +684,18 @@
           )}
           {state.ui.modal==="collect" && (
             <Modal onClose={()=>toggleModal()}>
-              <CollectModal vehicle={getVehicle(state.ui.modalData.vehicleId)} vehicles={state.vehicles} onAdd={(c)=>{ addCollection(state.ui.modalData.vehicleId, c); toggleModal(); }} />
+              <CollectModal
+                vehicle={getVehicle(state.ui.modalData.vehicleId)}
+                vehicles={state.vehicles}
+                onAdd={(c)=>{ addCollection(state.ui.modalData.vehicleId, c); toggleModal(); }}
+                fmt={fmt}
+                calc={{
+                  outstandingCapital,
+                  outstandingProfit,
+                  ownerOutstandingCapital,
+                  ownerOutstandingProfit
+                }}
+              />
             </Modal>
           )}
         </main>
@@ -626,11 +703,12 @@
     );
   }
 
-  // Components
+  // ===== Components =====
   const CardStat = ({label,value}) => (<div className="card"><div className="muted">{label}</div><div style={{fontSize:24,fontWeight:700}}>{value}</div></div>);
 
+  // Κίνηση Προσωπικού με “προορισμό” (ετικέτα)
   const CapitalLedgerForm = ({onAdd})=>{
-    const [f,setF]=React.useState({date:"",type:"in",amount:"",note:""});
+    const [f,setF]=React.useState({date:"",type:"in",amount:"",note:"",dest:"free"});
     return (
       <div className="row">
         <input type="date" value={f.date} onChange={e=>setF({...f,date:e.target.value})}/>
@@ -638,9 +716,19 @@
           <option value="in">Κατάθεση (Deposit)</option>
           <option value="out">Ανάληψη (Withdrawal)</option>
         </select>
-        <input type="number" placeholder="Ποσό (Amount)" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
-        <input placeholder="Σημείωση (Note)" value={f.note} onChange={e=>setF({...f,note:e.target.value})} style={{flex:1}}/>
-        <button className="btn primary" onClick={()=>{ if(parseNum(f.amount)>0){ onAdd(f); setF({date:"",type:f.type,amount:"",note:""}); } }}>Καταχώριση (Add)</button>
+        <select value={f.dest} onChange={e=>setF({...f,dest:e.target.value})}>
+          <option value="free">Ελεύθερο (Free)</option>
+          <option value="personal">Προσωπικό (Personal)</option>
+        </select>
+        <input type="number" placeholder="Ποσό" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
+        <input placeholder="Σημείωση" value={f.note} onChange={e=>setF({...f,note:e.target.value})} style={{flex:1}}/>
+        <button className="btn primary" onClick={()=>{
+          const amt = parseFloat(f.amount||0);
+          if(amt>0){
+            onAdd({ date: f.date || todayStr(), type: f.type, amount: amt, note: (f.dest==="free" ? "[to Free] " : "[to Personal] ") + (f.note||"") });
+            setF({date:"",type:f.type,amount:"",note:"",dest:f.dest});
+          }
+        }}>Καταχώριση</button>
       </div>
     );
   };
@@ -650,10 +738,10 @@
     return (
       <div className="row">
         <select value={f.vehicleId} onChange={e=>setF({...f,vehicleId:e.target.value})}>
-          <option value="">— Επίλεξε Όχημα (Select) —</option>
+          <option value="">— Επίλεξε Όχημα —</option>
           {vehicles.map(v=><option key={v.id} value={v.id}>{v.title}</option>)}
         </select>
-        <input type="number" placeholder="Ποσό (Amount)" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
+        <input type="number" placeholder="Ποσό" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})}/>
         <button className="btn" onClick={()=>{ if(f.vehicleId && parseNum(f.amount)>0){ onCommit(f.vehicleId, parseNum(f.amount)); setF({vehicleId:"",amount:""}); } }}>{label}</button>
       </div>
     );
@@ -663,8 +751,8 @@
     <div className="modal" onClick={onClose}>
       <div className="panel" onClick={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div className="title">Λεπτομέρειες <small className="eng">(Details)</small></div>
-          <button className="btn" onClick={onClose}>Κλείσιμο (Close)</button>
+          <div className="title">Λεπτομέρειες</div>
+          <button className="btn" onClick={onClose}>Κλείσιμο</button>
         </div>
         {children}
       </div>
@@ -677,7 +765,7 @@
     const totals = rows.reduce((acc,e)=>{ acc.all += parseNum(e.amount||0); acc[e.whoPaid]=(acc[e.whoPaid]||0)+parseNum(e.amount||0); return acc; }, {all:0});
     return (
       <div>
-        <div className="title">Έξοδα οχήματος <small className="eng">(Vehicle Expenses)</small> — {v?.title}</div>
+        <div className="title">Έξοδα οχήματος — {v?.title}</div>
         <table>
           <thead><tr><th>Ημ/νία</th><th>Ποιος</th><th>Ποσό</th><th>Σημείωση</th><th>Κατάσταση</th></tr></thead>
           <tbody>{rows.map(e=>(<tr key={e.id}><td>{e.date}</td><td>{e.whoPaid}</td><td>€ {fmt(e.amount)}</td><td>{e.note}</td><td>{e.status}</td></tr>))}</tbody>
@@ -695,18 +783,18 @@
     const [partners,setPartners] = React.useState(v?.partners||[]);
     return (
       <div>
-        <div className="title">Συνεργάτες & Κεφάλαιο <small className="eng">(Partners & Capital)</small> — {v?.title}</div>
+        <div className="title">Συνεργάτες & Κεφάλαιο — {v?.title}</div>
         {partners.map((p,i)=>(
           <div className="row" key={i} style={{marginTop:6}}>
             <select value={p.name} onChange={e=>{ const nn=[...partners]; nn[i]={...nn[i], name:e.target.value}; setPartners(nn); }}>
               {state.profile.collaborators.map(n=><option key={n}>{n}</option>)}
             </select>
-            <input type="number" placeholder="Κεφάλαιο (Capital)" value={p.capital} onChange={e=>{ const nn=[...partners]; nn[i]={...nn[i], capital:e.target.value}; setPartners(nn); }}/>
-            <button className="btn" onClick={()=>setPartners(partners.filter((_,j)=>j!==i))}>Αφαίρεση (Remove)</button>
+            <input type="number" placeholder="Κεφάλαιο" value={p.capital} onChange={e=>{ const nn=[...partners]; nn[i]={...nn[i], capital:e.target.value}; setPartners(nn); }}/>
+            <button className="btn" onClick={()=>setPartners(partners.filter((_,j)=>j!==i))}>Αφαίρεση</button>
           </div>
         ))}
-        <button className="btn" style={{marginTop:6}} onClick={()=>setPartners([...partners,{name:"Άγγελος",capital:0}])}>+ Συνεργάτης (Add Partner)</button>
-        <div style={{marginTop:10}}><button className="btn primary" onClick={()=>update(vehicleId, partners)}>Αποθήκευση (Save)</button></div>
+        <button className="btn" style={{marginTop:6}} onClick={()=>setPartners([...partners,{name:"Άγγελος",capital:0}])}>+ Συνεργάτης</button>
+        <div style={{marginTop:10}}><button className="btn primary" onClick={()=>update(vehicleId, partners)}>Αποθήκευση</button></div>
       </div>
     );
   };
@@ -721,69 +809,89 @@
     if(!vehicle) return null;
     return (
       <div>
-        <div className="title">Πώληση <small className="eng">(Sell)</small> — {vehicle.title}</div>
+        <div className="title">Πώληση — {vehicle.title}</div>
         <div className="grid grid4" style={{marginTop:8}}>
-          <input type="number" placeholder="Τιμή Πώλησης (Sale Price)" value={f.price} onChange={e=>setF({...f,price:e.target.value})}/>
+          <input type="number" placeholder="Τιμή Πώλησης" value={f.price} onChange={e=>setF({...f,price:e.target.value})}/>
           <input type="date" value={f.date} onChange={e=>setF({...f,date:e.target.value})}/>
-          <label><input type="checkbox" checked={!!f.settled} onChange={e=>setF({...f,settled:e.target.checked})}/> Ολοκληρωμένη <small className="eng">(Settled)</small></label>
+          <label><input type="checkbox" checked={!!f.settled} onChange={e=>setF({...f,settled:e.target.checked})}/> Ολοκληρωμένη</label>
         </div>
         <div className="card" style={{marginTop:8}}>
-          <div className="title">Ανταλλαγή <small className="eng">(Trade-in)</small></div>
+          <div className="title">Ανταλλαγή (Trade-in)</div>
           <div className="row">
-            <label><input type="checkbox" checked={!!f.tradeIn.enabled} onChange={e=>setF({...f,tradeIn:{...f.tradeIn,enabled:e.target.checked}})}/> Ενεργό (Enabled)</label>
-            <input type="number" placeholder="Αξία Ανταλλαγής (Value Offered)" value={f.tradeIn.valueOffered} onChange={e=>setF({...f,tradeIn:{...f.tradeIn, valueOffered:e.target.value}})}/>
-            <input type="number" placeholder="Μετρητά Διαφορά (+/−) (Cash Added)" value={f.tradeIn.cashAdded} onChange={e=>setF({...f,tradeIn:{...f.tradeIn, cashAdded:e.target.value}})}/>
-            <input type="number" placeholder="Δεσμευμένο Κεφάλαιο (Capital Committed)" value={f.tradeIn.capitalCommitted} onChange={e=>setF({...f,tradeIn:{...f.tradeIn, capitalCommitted:e.target.value}})}/>
+            <label><input type="checkbox" checked={!!f.tradeIn.enabled} onChange={e=>setF({...f,tradeIn:{...f.tradeIn,enabled:e.target.checked}})}/> Ενεργό</label>
+            <input type="number" placeholder="Αξία Ανταλλαγής" value={f.tradeIn.valueOffered} onChange={e=>setF({...f,tradeIn:{...f.tradeIn, valueOffered:e.target.value}})}/>
+            <input type="number" placeholder="Μετρητά Διαφορά (+/−)" value={f.tradeIn.cashAdded} onChange={e=>setF({...f,tradeIn:{...f.tradeIn, cashAdded:e.target.value}})}/>
+            <input type="number" placeholder="Δεσμευμένο Κεφάλαιο" value={f.tradeIn.capitalCommitted} onChange={e=>setF({...f,tradeIn:{...f.tradeIn, capitalCommitted:e.target.value}})}/>
           </div>
         </div>
-        <div style={{marginTop:10}}><button className="btn primary" onClick={()=>onSave(f)}>Αποθήκευση (Save)</button></div>
+        <div style={{marginTop:10}}><button className="btn primary" onClick={()=>onSave(f)}>Αποθήκευση</button></div>
       </div>
     );
   };
 
-  const CollectModal = ({vehicle,vehicles,onAdd})=>{
+  // ΝΕΟ: Collect με εμφανή υπόλοιπα (Total & Owner share)
+  const CollectModal = ({vehicle,vehicles,onAdd,fmt,calc})=>{
     const [f,setF]=React.useState({type:"profit",amount:"",date:"",destination:{type:"free",vehicleId:"",toVehicleAmount:""}});
     if(!vehicle) return null;
+
+    const totalOutCap = calc.outstandingCapital(vehicle);
+    const totalOutProf = calc.outstandingProfit(vehicle);
+    const ownerOutCap  = calc.ownerOutstandingCapital(vehicle);
+    const ownerOutProf = calc.ownerOutstandingProfit(vehicle);
+
     return (
       <div>
-        <div className="title">Είσπραξη <small className="eng">(Collection)</small> — {vehicle.title}</div>
+        <div className="title">Είσπραξη — {vehicle.title}</div>
+
+        <div className="card" style={{marginTop:8}}>
+          <div className="row">
+            <span className="pill">Υπόλοιπο Κεφαλαίου (Total): € {fmt(totalOutCap)}</span>
+            <span className="pill">Υπόλοιπο Κεφαλαίου (Owner): € {fmt(ownerOutCap)}</span>
+            <span className="pill">Υπόλοιπο Κέρδους (Total): € {fmt(totalOutProf)}</span>
+            <span className="pill">Υπόλοιπο Κέρδους (Owner): € {fmt(ownerOutProf)}</span>
+          </div>
+        </div>
+
         <div className="row" style={{marginTop:8}}>
           <select value={f.type} onChange={e=>setF({...f, type:e.target.value})}>
-            <option value="capital">Κεφάλαιο (Capital)</option>
-            <option value="profit">Κέρδος (Profit)</option>
+            <option value="capital">Κεφάλαιο</option>
+            <option value="profit">Κέρδος</option>
           </select>
-          <input type="number" placeholder="Σύνολο που εισπράχθηκε (Total Collected)" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/>
+          <input type="number" placeholder="Σύνολο που εισπράχθηκε" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/>
           <input type="date" value={f.date} onChange={e=>setF({...f, date:e.target.value})}/>
         </div>
+
         <div className="card" style={{marginTop:8}}>
-          <div className="title">Προορισμός <small className="eng">(Destination)</small></div>
+          <div className="title">Προορισμός</div>
           <div className="row">
             <label><input type="radio" name="dest" checked={f.destination.type==="free"} onChange={()=>setF({...f, destination:{type:"free"}})}/> Ελεύθερο Κεφάλαιο (Free)</label>
-            <label><input type="radio" name="dest" checked={f.destination.type==="vehicle"} onChange={()=>setF({...f, destination:{type:"vehicle", vehicleId:""}})}/> Όλο σε άλλο όχημα (All to Vehicle)</label>
+            <label><input type="radio" name="dest" checked={f.destination.type==="vehicle"} onChange={()=>setF({...f, destination:{type:"vehicle", vehicleId:""}})}/> Όλο σε άλλο όχημα</label>
             <label><input type="radio" name="dest" checked={f.destination.type==="split"} onChange={()=>setF({...f, destination:{type:"split", vehicleId:"", toVehicleAmount:""}})}/> Μοίρασμα (Split)</label>
           </div>
           {f.destination.type!=="free" && (
             <div className="row" style={{marginTop:6}}>
               <select value={f.destination.vehicleId||""} onChange={e=>setF({...f, destination:{...f.destination, vehicleId:e.target.value}})}>
-                <option value="">— Επίλεξε Όχημα (Select) —</option>
+                <option value="">— Επίλεξε Όχημα —</option>
                 {vehicles.filter(v=>v.id!==vehicle.id && !v.sale?.settled).map(v=><option key={v.id} value={v.id}>{v.title}</option>)}
               </select>
               {f.destination.type==="split" && (
-                <input type="number" placeholder="Ποσό προς όχημα (To Vehicle)" value={f.destination.toVehicleAmount||""} onChange={e=>setF({...f, destination:{...f.destination, toVehicleAmount:e.target.value}})}/>
+                <input type="number" placeholder="Ποσό προς όχημα" value={f.destination.toVehicleAmount||""} onChange={e=>setF({...f, destination:{...f.destination, toVehicleAmount:e.target.value}})}/>
               )}
             </div>
           )}
         </div>
+
         <div className="muted" style={{marginTop:6}}>
-          - «Όλο σε άλλο όχημα»: όλο το ποσό γίνεται Δέσμευση (Commit) στο επιλεγμένο όχημα.<br/>
-          - «Μοίρασμα (Split)»: το «Ποσό προς όχημα» γίνεται Commit, το υπόλοιπο πάει Ελεύθερο Κεφάλαιο (Free).
+          - Αν επιλέξεις «Όλο σε άλλο όχημα»: όλο το ποσό γίνεται Δέσμευση στο επιλεγμένο όχημα.<br/>
+          - «Μοίρασμα (Split)»: το «Ποσό προς όχημα» γίνεται Δέσμευση, το υπόλοιπο πάει Free.
         </div>
-        <div style={{marginTop:10}}><button className="btn primary" onClick={()=>{ if(parseNum(f.amount)>0){ onAdd(f); } }}>Καταχώριση (Add)</button></div>
+
+        <div style={{marginTop:10}}><button className="btn primary" onClick={()=>{ const amt=parseNum(f.amount); if(amt>0){ onAdd(f); } }}>Καταχώριση</button></div>
       </div>
     );
   };
 
-  // Demo seed για να βλέπεις ροή (σβήσε τα δεδομένα αν θέλεις)
+  // ===== Seed demo =====
   function seed(base){
     const s = JSON.parse(JSON.stringify(base));
     s.capital.personal = 15000;
