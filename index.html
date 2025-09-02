@@ -97,22 +97,16 @@
     const sumPurchasesAll = state.vehicles.filter(v=>!v.customerVehicle).reduce((a,v)=>a+parseNum(v.purchasePrice||0),0);
     const ownerName = state.profile.ownerName || "Άγγελος";
 
-    // Gross profit (όλου του project)
     const grossProfit = (v) => parseNum(v.sale?.price) - parseNum(v.purchasePrice) - vehicleExpensesTotal(v.id);
-
-    // Βάση κεφαλαίου (αγορά + έξοδα) — όλου του project
     const capitalBasis = (v)=> parseNum(v.purchasePrice) + vehicleExpensesTotal(v.id);
 
-    // Μερίδια
     const ownerShareCapital = (v)=>{
       const tot = v.partners.reduce((a,p)=>a+(+p.capital||0),0);
       const own = v.partners.find(p=>p.name===ownerName)?.capital||0;
       return tot>0 ? own/tot : 1;
     };
-    const profitOwnerShare = (v)=> (v.partners.length<=1 ? 1 : 0.5); // Κέρδος πάντα 50-50 όταν υπάρχουν 2+
+    const profitOwnerShare = (v)=> (v.partners.length<=1 ? 1 : 0.5);
 
-    // ====== OWNER-ONLY Collections ======
-    // Μαζεύουμε μόνο τις εισπράξεις που έχουν recipient == ownerName (ή κενό -> το θεωρούμε owner για συμβατότητα)
     const collectedCapitalOwner = (v) =>
       (v.sale?.collections||[]).filter(c=>c.type==="capital" && (c.recipient??ownerName)===ownerName)
         .reduce((a,b)=>a+parseNum(b.amount||0),0);
@@ -127,26 +121,20 @@
     const ownerOutstandingCapital = (v)=> Math.max(0, ownerCapitalTarget(v) - collectedCapitalOwner(v));
     const ownerOutstandingProfit  = (v)=> Math.max(0, ownerProfitTarget(v)  - collectedProfitOwner(v));
 
-    // Συνολικά για εσένα
     const totalOwnerCommitted = state.vehicles.reduce((s,v)=> s + (v.partners.find(p=>p.name===ownerName)?.capital||0), 0);
 
-    // Προσωπικό net
     const personalNet = state.capital.personal +
       state.capital.ledger.reduce((s,l)=> s + (l.type==="in"? +1 : -1) * (l.amount||0), 0);
 
-    // Free Capital (υπολογιζόμενο)
     const paidOverheads = state.expenses.filter(e=>e.type==="overhead" && e.status==="paid");
     const computeFreeCapital = () => {
       let free = parseNum(personalNet);
-      // δεσμεύσεις Αγγέλου
       state.vehicles.forEach(v=>{
         const ag = v.partners.find(p=>p.name===ownerName);
         if(ag) free -= parseNum(ag.capital||0);
       });
-      // έξοδα πληρωμένα από σένα
       paidOverheads.forEach(e=>{ if(e.whoPaid===ownerName) free -= parseNum(e.amount||0); });
       state.expenses.filter(e=>e.type==="vehicle" && e.status==="paid" && e.whoPaid===ownerName).forEach(e=> free -= parseNum(e.amount||0));
-      // εισπράξεις που πάνε στο free (μόνο οι δικές σου, αλλά το log το καταγράφουμε όταν δηλώνεις είσπραξη)
       state.vehicles.forEach(v=>{
         (v.sale?.collections||[]).forEach(c=>{
           const mine = (c.recipient??ownerName)===ownerName;
@@ -167,18 +155,15 @@
     };
     const freeCapital = computeFreeCapital();
 
-    // Μηνιαία προσωπικά
     const currentYM = ym(todayStr());
     const monthlyPersonalSpend = (yyyymm=currentYM) =>
       state.expenses
         .filter(e => e.type==="overhead" && e.category==="personal" && ym(e.date)===yyyymm)
         .reduce((s,e)=> s + parseNum(e.amount||0), 0);
 
-    // Συνολικό προσωπικό overview (δεσμευμένο σου + free + αναμενόμενο κέρδος δικό σου)
     const totalOwnerOutstandingProfit = state.vehicles.reduce((s,v)=> s + ownerOutstandingProfit(v), 0);
     const totalPersonalOverview = totalOwnerCommitted + freeCapital + totalOwnerOutstandingProfit;
 
-    // ===== Logs & Actions =====
     const logFree = (ev) => setState(s=>({...s, freeLog:[{id:uid(), date:ev.date||todayStr(), ...ev}, ...s.freeLog]}));
 
     const addCapitalLedger = (entry) =>
@@ -252,7 +237,6 @@
         ...v, sale:{ ...v.sale, price:parseNum(sale.price), date: sale.date||todayStr(), settled: !!sale.settled, tradeIn: sale.tradeIn || v.sale.tradeIn }
       } : v)}));
 
-    // Είσπραξη (OWNER ONLY): καταγράφουμε recipient = ownerName
     const addCollection = (vid, col) =>
       setState(s=>({...s, vehicles: s.vehicles.map(v=>{
         if(v.id!==vid) return v;
@@ -300,12 +284,10 @@
         } else if(col.destination?.type==="free"){
           logFree({amount:+amount, kind:"collect_free", ref:v.title, details:`Είσπραξη ${col.type} → Free`});
         }
-        // destination.type === 'tradein' => δεν αγγίζουμε Free
 
         return {...v, sale:{...v.sale, collections}};
       })}));
 
-    // Διαγραφή οχήματος
     const removeVehicle = (vid) => {
       const v = getVehicle(vid);
       if(!v) return;
@@ -336,7 +318,6 @@
       }
     };
 
-    // Trade-in: νέο όχημα + είσπραξη στο παλιό ΜΟΝΟ για εσένα
     const createTradeInFlow = (soldVehicleId, tradeData) => {
       const newId = uid();
       const partners = (tradeData.partners||[]).map(p=>({name:p.name, capital:parseNum(p.capital||0)}));
@@ -364,10 +345,9 @@
         amount,
         destination:{type:"tradein", vehicleId:newId}
       };
-      setTimeout(()=>addCollection(soldVehicleId, col), 0); // recipient = ownerName by default
+      setTimeout(()=>addCollection(soldVehicleId, col), 0);
     };
 
-    // UI helpers & exports
     const toggleModal = (name=null, data=null) => setState(s=>({...s, ui:{modal:name, modalData:data}}));
 
     const exportJSON = () => {
@@ -398,7 +378,6 @@
       doc.save(`CenterCar-Report-${todayStr()}.pdf`);
     };
 
-    // Forms state
     const [formV, setFormV] = useState({title:"",vin:"",purchasePrice:"",purchaseDate:"",customerVehicle:false,clientBudget:"", partners:[{name:ownerName, capital:0}]});
     const [formVehExp,setFormVehExp]=useState({vehicleId:"",amount:"",date:"",note:"",whoPaid:ownerName,status:"unpaid"});
     const [formOver,setFormOver]=useState({category:"personal",amount:"",date:"",note:"",whoPaid:ownerName,status:"unpaid",dueDate:""});
@@ -409,7 +388,6 @@
 
     const collaborators = state.profile.collaborators;
 
-    // ===== Render =====
     return (
       <div>
         <header>
@@ -427,7 +405,7 @@
             </div>
           </div>
 
-          <div className="container row tabs" style={{marginBottom:8}}">
+          <div className="container row tabs" style={{marginBottom:8}}>
             {[
               ["dashboard","Πίνακας Ελέγχου"],
               ["vehicles","Οχήματα"],
@@ -747,7 +725,7 @@
               <div className="card">
                 <div className="title">Μηνιαία Αναφορά</div>
                 <div className="row"><input type="month" value={reportMonth} onChange={e=>setReportMonth(e.target.value)} /></div>
-                <div className="grid grid3" style={{marginTop:8}}">
+                <div className="grid grid3" style={{marginTop:8}}>
                   <div className="card">
                     <div className="title">Εισπραχθέν Κέρδος Ιδιοκτήτη (cash)</div>
                     <div style={{fontSize:24}}>
@@ -756,7 +734,7 @@
                           const collectedThisMonth = (v.sale?.collections||[])
                             .filter(c=> c.type==="profit" && (c.recipient??ownerName)===ownerName && ym(c.date)===reportMonth)
                             .reduce((a,b)=>a+parseNum(b.amount||0),0);
-                          const share = 1; // ήδη είναι μόνο τα δικά σου, άρα 1:1
+                          const share = 1;
                           return sum + collectedThisMonth * share;
                         },0)
                       )}
@@ -853,7 +831,6 @@
             </section>
           )}
 
-          {/* ===== Modals ===== */}
           {state.ui.modal==="vehicleExpenses" && (
             <Modal onClose={()=>toggleModal()}>
               <VehicleExpensesModal state={state} vehicleId={state.ui.modalData.vehicleId} fmt={fmt} getVehicle={getVehicle} />
@@ -933,7 +910,6 @@
     );
   }
 
-  // ===== Components
   const CardStat = ({label,value}) => (<div className="card"><div className="muted">{label}</div><div style={{fontSize:24,fontWeight:700}}>{value}</div></div>);
   const CardStatFree = ({label,value,onHistory}) => (
     <div className="card">
@@ -1201,10 +1177,6 @@
     if(!vehicle) return null;
     const colsAll = [...(vehicle.sale?.collections||[])].sort((a,b)=> (a.date||"").localeCompare(b.date||""));
 
-    // Μόνο οι δικές σου εισπράξεις
-    const cols = colsAll.filter(c=> (c.recipient??"Άγγελος") === (vehicle?.ownerName||"") || (c.recipient??"Άγγελος")==="Άγγελος");
-
-    // Στόχοι (owner)
     const capStart = ownerCapitalTarget(vehicle);
     const profStart = ownerProfitTarget(vehicle);
 
