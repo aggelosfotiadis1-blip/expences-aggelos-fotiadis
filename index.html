@@ -218,39 +218,36 @@ function computeFree(){
   const yourName = getOwner();
   let free = 0;
 
-  // Κινήσεις στο Ledger προς Free
-  for (const m of state.capitalLedger) {
-    if (m.dest === 'free') free += (m.type === 'in' ? Number(m.amount) : -Number(m.amount || 0));
+  // Ledger → Free
+  for(const m of state.capitalLedger){
+    if(m.dest==='free') free += (m.type==='in'? Number(m.amount): -Number(m.amount||0));
   }
 
-  // Δεσμεύσεις/Αποδεσμεύσεις, Έξοδα & Εισπράξεις Free από Οχήματα
-  for (const v of state.vehicles) {
-    for (const c of v.commits) {
-      if (c.name === yourName) {
-        free += (c.kind === 'commit' ? -Number(c.amount || 0) : Number(c.amount || 0));
+  // Vehicles: commits/releases, paid expenses by you, receipts to Free/Split
+  for(const v of state.vehicles){
+    for(const c of v.commits){
+      if(c.name===yourName){
+        free += (c.kind==='commit'? -Number(c.amount||0): Number(c.amount||0));
       }
     }
-    const paidByYou = state.expenses.filter(e => e.type === 'vehicle' && e.vehicleId === v.id && e.status === 'paid' && e.whoPaid === yourName);
-    free -= sum(paidByYou.map(x => x.amount));
-    for (const r of v.receipts) {
-      if (r.owner === yourName && r.dest === 'free') free += Number(r.amount || 0);
-      if (r.owner === yourName && r.dest === 'split' && r.details?.toFree) free += Number(r.details.toFree || 0);
+    const paidByYou = state.expenses.filter(e=> e.type==='vehicle' && e.vehicleId===v.id && e.status==='paid' && e.whoPaid===yourName);
+    free -= sum(paidByYou.map(x=> x.amount));
+    for(const r of v.receipts){
+      if(r.owner===yourName && r.dest==='free') free += Number(r.amount||0);
+      if(r.owner===yourName && r.dest==='split' && r.details?.toFree) free += Number(r.details.toFree||0);
     }
   }
 
-  // Overheads που πλήρωσες εσύ
-  const ohPaid = state.expenses.filter(e => e.type === 'overhead' && e.status === 'paid' && e.whoPaid === yourName);
-  free -= sum(ohPaid.map(x => x.amount));
+  // Overheads you paid
+  const ohPaid = state.expenses.filter(e=> e.type==='overhead' && e.status==='paid' && e.whoPaid===yourName);
+  free -= sum(ohPaid.map(x=> x.amount));
 
-  // Old Debts → μόνο το κομμάτι που πάει Free
-  for (const c of state.oldDebts.cases) {
-    for (const r of (c.receipts || [])) {
-      if (r.owner === yourName) {
-        if (r.dest === 'free') {
-          free += Number(r.amount || 0);
-        } else if (r.dest === 'split' && r.details?.toFree) {
-          free += Number(r.details.toFree || 0);
-        }
+  // Old Debts → only part to Free
+  for(const c of state.oldDebts.cases){
+    for(const r of (c.receipts||[])){
+      if(r.owner===yourName){
+        if(r.dest==='free') free += Number(r.amount||0);
+        else if(r.dest==='split' && r.details?.toFree) free += Number(r.details.toFree||0);
       }
     }
   }
@@ -457,6 +454,9 @@ function viewVehicles(host){
 }
 
 function openAddVehicle(){
+  // initialize temp partners OUTSIDE of HTML
+  window._tmpParts = [{ name: getOwner(), capital: 0 }];
+
   openModal(`<h3>Προσθήκη Οχήματος</h3>
     <div class="grid-2">
       <div><label>Τίτλος/Μοντέλο</label><input id="v_title"></div>
@@ -477,7 +477,6 @@ function openAddVehicle(){
       <button class="btn" onclick="addPartnerRow()">+ Συνεργάτης</button>
       <button class="btn primary" onclick="saveNewVehicle()">Αποθήκευση</button>
     </div>
-    <script>window._tmpParts=[{name:'${getOwner()}', capital:0}];</script>
   `);
   renderPartnerRows();
 }
