@@ -11,14 +11,25 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial}
-  header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,var(--bg),rgba(15,17,21,.85));backdrop-filter:saturate(120%) blur(6px);border-bottom:1px solid var(--outline)}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,var(--bg),rgba(15,17,21,.85));
+    backdrop-filter:saturate(120%) blur(6px);border-bottom:1px solid var(--outline)}
   .topbar{display:flex;gap:.5rem;align-items:center;justify-content:space-between;padding:.6rem .8rem;max-width:1100px;margin:0 auto}
   .brand{font-weight:700;letter-spacing:.4px}
-  nav{display:flex;flex-wrap:wrap;gap:.35rem}
-  nav button{border:1px solid var(--outline);background:var(--card);color:var(--text);padding:.5rem .7rem;border-radius:.6rem;cursor:pointer}
+
+  /* NAV: οριζόντιο scroll για κινητό */
+  nav{
+    display:flex; gap:.35rem; overflow-x:auto; padding-bottom:.2rem; -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  nav::-webkit-scrollbar{display:none}
+  nav button{border:1px solid var(--outline);background:var(--card);color:var(--text);
+    padding:.5rem .7rem;border-radius:.6rem;cursor:pointer; flex:0 0 auto;}
   nav button.active{outline:2px solid var(--accent)}
+
   .container{max-width:1100px;margin:0 auto;padding:1rem}
+  .tools{position:sticky; top:52px; z-index:15; background:linear-gradient(180deg,var(--bg),rgba(15,17,21,.85));
+    backdrop-filter:blur(6px); border-bottom:1px solid var(--outline); padding:.5rem .8rem;}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
   @media (max-width:800px){.row{grid-template-columns:1fr}}
   .card{background:var(--card);border:1px solid var(--outline);border-radius:.8rem;padding:1rem}
@@ -43,9 +54,9 @@
   .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem}
   .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:.6rem}
   .grid-auto{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.6rem}
-  .sticky-tools{position:sticky;top:52px;z-index:9;background:linear-gradient(180deg,var(--bg),rgba(15,17,21,.85));backdrop-filter:blur(6px);padding:.5rem;border-bottom:1px solid var(--outline)}
+  .sticky-tools{position:sticky;top:100px;z-index:9;background:linear-gradient(180deg,var(--bg),rgba(15,17,21,.85));backdrop-filter:blur(6px);padding:.5rem;border-bottom:1px solid var(--outline)}
   .errorbar{position:fixed;left:0;right:0;bottom:0;z-index:100;background:rgba(239,68,68,.12);border-top:2px solid var(--red);padding:.6rem .9rem;color:#fecaca;font-size:.9rem}
-  .errorbar code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .errorbar code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   dialog{border:none;border-radius:.9rem;padding:0;max-width:min(900px,96vw)}
   .modal{background:var(--card);border:1px solid var(--outline);padding:1rem;border-radius:.9rem}
   dialog::backdrop{background:rgba(0,0,0,.5)}
@@ -54,7 +65,6 @@
   .kpi{background:#0e1117;border:1px solid var(--outline);border-radius:.8rem;padding:.8rem}
   .kpi .big{font-size:1.4rem;font-weight:700}
   .scroll-x{overflow-x:auto}
-  .trash-badge{font-size:.75rem;color:#fca5a5}
 </style>
 </head>
 <body>
@@ -71,6 +81,14 @@
 </header>
 
 <div class="container">
+  <!-- Δεύτερη, πάντα ορατή μπάρα εργαλείων -->
+  <div class="tools flex">
+    <button class="btn" id="btnImport2">Εισαγωγή</button>
+    <button class="btn" id="btnPaste">Επικόλληση JSON</button>
+    <button class="btn" id="btnExport2">Εξαγωγή JSON</button>
+    <button class="btn" id="btnPDF2">Εξαγωγή PDF</button>
+  </div>
+
   <div id="view"></div>
 </div>
 
@@ -87,11 +105,7 @@
 
 <script>
 // -------- Utilities
-const el = (html)=> {
-  const t = document.createElement('template');
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild;
-};
+const el = (html)=>{ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; };
 const fmt = new Intl.NumberFormat('el-GR',{style:'currency',currency:'EUR',maximumFractionDigits:0});
 const dfmt = (s)=> s? new Date(s).toLocaleDateString('el-GR'):'';
 const uid = ()=> Math.random().toString(36).slice(2,10);
@@ -104,81 +118,47 @@ window.addEventListener('unhandledrejection', (e)=> showError('Promise rejection
 function showError(msg,file,line,col,stack){
   const host = document.getElementById('errorHost');
   const bar = el(`<div class="errorbar">
-    <div><strong>Σφάλμα:</strong> ${msg.replace(/</g,'&lt;')}</div>
+    <div><strong>Σφάλμα:</strong> ${String(msg).replace(/</g,'&lt;')}</div>
     <div class="muted"><code>${file||''}:${line||''}:${col||''}</code></div>
     ${stack? `<div><code>${String(stack).slice(0,500)}</code></div>`:''}
   </div>`);
   host.innerHTML=''; host.append(bar);
-  console.error(msg, file, line, col, stack);
-  setTimeout(()=> { if (host.contains(bar)) host.removeChild(bar); }, 8000);
+  setTimeout(()=>{ if(host.contains(bar)) host.removeChild(bar); },8000);
 }
 
 // -------- Storage & Version
-const VERSION = new URLSearchParams(location.search).get('v') || '35';
+const VERSION = new URLSearchParams(location.search).get('v') || '39'; // αλλάζει για cache bypass
 const KEY = 'ccar.v3.5.'+VERSION;
-function load(){
-  const raw = localStorage.getItem(KEY);
-  const data = raw? JSON.parse(raw) : seed();
-  return migrate(data);
-}
-function save(){
-  localStorage.setItem(KEY, JSON.stringify(state));
-}
+function load(){ const raw=localStorage.getItem(KEY); const data=raw?JSON.parse(raw):seed(); return migrate(data); }
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
 function seed(){
   return {
     meta:{created:Date.now(), version:VERSION},
     settings:{ ownerName:'Άγγελος', personalMonthlyLimit:0, reportMode:'cash', partners:['Άγγελος'] },
-    capitalLedger:[], // {id,date,type:'in'|'out', amount, dest:'personal'|'free', note}
-    freeHistory:[],   // {id,date,kind:'ledger'|'commit'|'release'|'expense'|'receipt'|'manual', amount, note, ref}
-    vehicles:[],      // see structure below
-    expenses:[],      // {id,type:'overhead'|'vehicle', vehicleId:null|id, category, whoPaid, status:'unpaid'|'paid', amount, dueDate, note, date}
-    sold:[],          // vehicle ids concluded (for fast view)
-    oldDebts:{ cases:[], owedToMe:[] }, // cases: {id,title, name, capitalOwed, profitOwed, receipts:[]}
-    trash:{ vehicles:[], expenses:[] }
+    capitalLedger:[], freeHistory:[], vehicles:[], expenses:[], sold:[],
+    oldDebts:{ cases:[], owedToMe:[] }, trash:{ vehicles:[], expenses:[] }
   };
 }
 function migrate(data){
-  // Fill missing arrays/fields to avoid JS errors
   data.settings ??= {ownerName:'', personalMonthlyLimit:0, reportMode:'cash', partners:['Άγγελος']};
   data.settings.partners ??= ['Άγγελος'];
-  data.capitalLedger ??= [];
-  data.freeHistory ??= [];
-  data.vehicles ??= [];
-  data.expenses ??= [];
-  data.sold ??= [];
-  data.oldDebts ??= {cases:[], owedToMe:[]};
+  data.capitalLedger ??= []; data.freeHistory ??= []; data.vehicles ??= [];
+  data.expenses ??= []; data.sold ??= []; data.oldDebts ??= {cases:[], owedToMe:[]};
   data.trash ??= {vehicles:[], expenses:[]};
-
-  // Vehicles migration
   for(const v of data.vehicles){
-    v.id ??= uid();
-    v.title ??= 'Όχημα';
-    v.vin ??= '';
-    v.purchaseDate ??= '';
-    v.purchasePrice = Number(v.purchasePrice||0);
-    v.customerVehicle = Boolean(v.customerVehicle);
-    v.partners ??= [{name: data.settings?.ownerName || 'Άγγελος', capital: v.purchasePrice||0}];
+    v.id ??= uid(); v.title ??= 'Όχημα'; v.vin ??= ''; v.purchaseDate ??= '';
+    v.purchasePrice = Number(v.purchasePrice||0); v.customerVehicle = !!v.customerVehicle;
+    v.partners ??= [{name:data.settings?.ownerName||'Άγγελος', capital:v.purchasePrice||0}];
     v.sale ??= {price:0, date:'', settled:false, tradeIn:null};
-    v.receipts ??= []; // {id,date,type:'capital'|'profit', amount, dest:'free'|'vehicle'|'split', details:{}, owner}
-    v.commits ??= [];  // {id,date,kind:'commit'|'release', name, amount, note}
-    v.notes ??= '';
-    v.deleted ??= false;
-    v.archived ??= false;
+    v.receipts ??= []; v.commits ??= []; v.notes ??= ''; v.deleted ??= false; v.archived ??= false;
   }
-  // Expenses migration
   for(const e of data.expenses){
-    e.id ??= uid();
-    e.type ??= e.vehicleId? 'vehicle':'overhead';
-    e.status ??= e.status || 'unpaid';
-    e.amount = Number(e.amount||0);
-    e.whoPaid ??= '';
+    e.id ??= uid(); e.type ??= e.vehicleId?'vehicle':'overhead';
+    e.status ??= e.status || 'unpaid'; e.amount = Number(e.amount||0); e.whoPaid ??= '';
   }
-  // Old Debts
-  data.oldDebts.cases ??= [];
-  data.oldDebts.owedToMe ??= [];
+  data.oldDebts.cases ??= []; data.oldDebts.owedToMe ??= [];
   return data;
 }
-
 let state = load();
 
 // -------- Calculations
@@ -207,11 +187,10 @@ function vehicleTotals(v){
   const yourProfitShare = alone ? grossProfit : grossProfit/2;
   const yourProfitBalance = Math.max(0, yourProfitShare - yourProfitReceipts);
 
-  const committed = sum(v.commits.filter(c=> c.kind==='commit').map(c=> Number(c.amount||0))) - sum(v.commits.filter(c=> c.kind==='release').map(c=> Number(c.amount||0)));
-  return {
-    partnerCapital, yourCapital, yourExpenses, totalExpenses, price, grossProfit,
-    yourCapitalReceipts, yourProfitReceipts, yourCapitalBalance, yourProfitBalance, committed
-  };
+  const committed = sum(v.commits.filter(c=> c.kind==='commit').map(c=> Number(c.amount||0))) -
+                    sum(v.commits.filter(c=> c.kind==='release').map(c=> Number(c.amount||0)));
+  return { partnerCapital, yourCapital, yourExpenses, totalExpenses, price, grossProfit,
+           yourCapitalReceipts, yourProfitReceipts, yourCapitalBalance, yourProfitBalance, committed };
 }
 
 function computeFree(){
@@ -220,15 +199,13 @@ function computeFree(){
 
   // Ledger → Free
   for(const m of state.capitalLedger){
-    if(m.dest==='free') free += (m.type==='in'? Number(m.amount): -Number(m.amount||0));
+    if(m.dest==='free') free += (m.type==='in' ? Number(m.amount) : -Number(m.amount||0));
   }
 
-  // Vehicles: commits/releases, paid expenses by you, receipts to Free/Split
+  // Vehicles
   for(const v of state.vehicles){
     for(const c of v.commits){
-      if(c.name===yourName){
-        free += (c.kind==='commit'? -Number(c.amount||0): Number(c.amount||0));
-      }
+      if(c.name===yourName) free += (c.kind==='commit' ? -Number(c.amount||0) : Number(c.amount||0));
     }
     const paidByYou = state.expenses.filter(e=> e.type==='vehicle' && e.vehicleId===v.id && e.status==='paid' && e.whoPaid===yourName);
     free -= sum(paidByYou.map(x=> x.amount));
@@ -242,7 +219,7 @@ function computeFree(){
   const ohPaid = state.expenses.filter(e=> e.type==='overhead' && e.status==='paid' && e.whoPaid===yourName);
   free -= sum(ohPaid.map(x=> x.amount));
 
-  // Old Debts → only part to Free
+  // Old Debts → μόνο ό,τι πήγε στο Free
   for(const c of state.oldDebts.cases){
     for(const r of (c.receipts||[])){
       if(r.owner===yourName){
@@ -251,7 +228,6 @@ function computeFree(){
       }
     }
   }
-
   return free;
 }
 
@@ -278,7 +254,7 @@ function renderTabs(){
   }
 }
 function draw(){ renderTabs(); const v = document.getElementById('view'); v.innerHTML='';
-  try {
+  try{
     if(currentTab==='dash') return viewDashboard(v);
     if(currentTab==='vehicles') return viewVehicles(v);
     if(currentTab==='expenses') return viewExpenses(v);
@@ -287,7 +263,7 @@ function draw(){ renderTabs(); const v = document.getElementById('view'); v.inne
     if(currentTab==='settings') return viewSettings(v);
     if(currentTab==='olddebts') return viewOldDebts(v);
     if(currentTab==='trash') return viewTrash(v);
-  } catch(e){ showError(e.message, '', 0,0, e.stack); }
+  }catch(e){ showError(e.message,'',0,0,e.stack); }
 }
 
 // -------- Dashboard
@@ -304,7 +280,6 @@ function viewDashboard(host){
     <div class="kpi"><div class="muted">Αναμενόμενο Κέρδος (Δικό σου)</div><div class="big">${fmt.format(expectedYourProfit)}</div></div>
   </div>`));
 }
-
 function openFreeHistory(){
   const free = computeFree();
   const items = state.freeHistory;
@@ -318,15 +293,11 @@ function openFreeHistory(){
   body.push(`</tbody></table></div>`);
   openModal(body.join(''));
 }
-function delFreeHist(id){
-  state.freeHistory = state.freeHistory.filter(x=> x.id!==id);
-  save(); closeModal(); openFreeHistory();
-}
+function delFreeHist(id){ state.freeHistory = state.freeHistory.filter(x=> x.id!==id); save(); closeModal(); openFreeHistory(); }
 
 // -------- Settings
 function viewSettings(host){
   const s = state.settings;
-  const partnersList = s.partners.join(', ');
   host.append(el(`<div class="card">
     <h3>Ρυθμίσεις</h3>
     <div class="grid-3">
@@ -339,23 +310,24 @@ function viewSettings(host){
         </select></div>
     </div>
     <div class="space"></div>
-    <label>Συνεργάτες (λίστα)</label>
+    <label>Συνεργάτες (λίστα — χώρισε με ,)</label>
     <div class="flex">
-      <input id="partners" value="${partnersList}" placeholder="Χώρισε με κόμμα (,)">
+      <input id="partners" value="${s.partners.join(', ')}" placeholder="π.χ. Άγγελος, Χρήστος">
       <button class="btn primary" onclick="saveSettings()">Αποθήκευση</button>
     </div>
   </div>`));
 }
 function saveSettings(){
-  const ownerName = document.getElementById('ownerName').value.trim()||'Άγγελος';
+  const ownerName = (document.getElementById('ownerName').value||'').trim() || 'Άγγελος';
   const limit = Number(document.getElementById('limit').value||0);
   const reportMode = document.getElementById('reportMode').value;
-  const partners = document.getElementById('partners').value.split(',').map(x=>x.trim()).filter(Boolean);
-  state.settings = {ownerName, personalMonthlyLimit:limit, reportMode, partners: Array.from(new Set(partners))};
+  const partners = (document.getElementById('partners').value||'')
+                    .split(',').map(x=>x.trim()).filter(Boolean);
+  state.settings = {ownerName, personalMonthlyLimit:limit, reportMode, partners:[...new Set(partners)]};
   save(); draw();
 }
 
-// -------- Capital (Personal + Free)
+// -------- Capital
 function viewCapital(host){
   const ledger = state.capitalLedger;
   const free = computeFree();
@@ -373,7 +345,7 @@ function viewCapital(host){
         <div style="align-self:end"><button class="btn primary" onclick="addCap()">Καταχώριση</button></div></div>
       </div>
       <div class="space"></div>
-      <div class="muted">Το Free ενημερώνεται αυτόματα όταν ο προορισμός είναι Free και γράφεται στο Ιστορικό Free.</div>
+      <div class="muted">Αν ο προορισμός είναι Free, γράφεται και στο «Ιστορικό Free».</div>
     </div>
     <div class="card">
       <h3>Ισοζύγιο</h3>
@@ -399,20 +371,18 @@ function addCap(){
   const m = {id:uid(), type, dest, amount, date, note};
   state.capitalLedger.unshift(m);
   if(dest==='free'){
-    state.freeHistory.unshift({id:uid(), date, kind:'ledger', amount: (type==='in'? amount: -amount), note, ref:m.id});
+    state.freeHistory.unshift({id:uid(), date, kind:'ledger', amount:(type==='in'? amount:-amount), note, ref:m.id});
   }
   save(); draw();
 }
 function delCap(id){
   const m = state.capitalLedger.find(x=> x.id===id);
   state.capitalLedger = state.capitalLedger.filter(x=> x.id!==id);
-  if(m?.dest==='free'){
-    state.freeHistory = state.freeHistory.filter(x=> x.ref!==id);
-  }
+  if(m?.dest==='free'){ state.freeHistory = state.freeHistory.filter(x=> x.ref!==id); }
   save(); draw();
 }
 
-// -------- Vehicles (list + add/edit/delete shells)
+// -------- Vehicles
 function viewVehicles(host){
   const tools = el(`<div class="sticky-tools flex">
     <button class="btn primary" onclick="openAddVehicle()">+ Προσθήκη Οχήματος</button>
@@ -454,8 +424,7 @@ function viewVehicles(host){
 }
 
 function openAddVehicle(){
-  // initialize temp partners OUTSIDE of HTML
-  window._tmpParts = [{ name: getOwner(), capital: 0 }];
+  window._tmpParts = [{ name:getOwner(), capital:0 }];
 
   openModal(`<h3>Προσθήκη Οχήματος</h3>
     <div class="grid-2">
@@ -493,10 +462,8 @@ function renderPartnerRows(){
     </div>`);
     box.append(row);
   });
-  box.querySelectorAll('.selName').forEach(sel=> sel.onchange = (e)=>{
-    const i = Number(e.target.dataset.i); window._tmpParts[i].name = e.target.value; });
-  box.querySelectorAll('.inpCap').forEach(inp=> inp.oninput = (e)=>{
-    const i = Number(e.target.dataset.i); window._tmpParts[i].capital = Number(e.target.value||0); });
+  box.querySelectorAll('.selName').forEach(sel=> sel.onchange=(e)=>{ const i=Number(e.target.dataset.i); window._tmpParts[i].name=e.target.value; });
+  box.querySelectorAll('.inpCap').forEach(inp=> inp.oninput=(e)=>{ const i=Number(e.target.dataset.i); window._tmpParts[i].capital=Number(e.target.value||0); });
 }
 function removePartRow(i){ window._tmpParts.splice(i,1); renderPartnerRows(); }
 function saveNewVehicle(){
@@ -551,10 +518,8 @@ function renderEditPartRows(){
     </div>`);
     box.append(row);
   });
-  box.querySelectorAll('.selName').forEach(sel=> sel.onchange = (e)=>{
-    const i = Number(e.target.dataset.i); window._editParts[i].name = e.target.value; });
-  box.querySelectorAll('.inpCap').forEach(inp=> inp.oninput = (e)=>{
-    const i = Number(e.target.dataset.i); window._editParts[i].capital = Number(e.target.value||0); });
+  box.querySelectorAll('.selName').forEach(sel=> sel.onchange=(e)=>{ const i=Number(e.target.dataset.i); window._editParts[i].name=e.target.value; });
+  box.querySelectorAll('.inpCap').forEach(inp=> inp.oninput=(e)=>{ const i=Number(e.target.dataset.i); window._editParts[i].capital=Number(e.target.value||0); });
 }
 function addEditPartRow(){ window._editParts.push({name:getOwner(), capital:0}); renderEditPartRows(); }
 function removeEditPartRow(i){ window._editParts.splice(i,1); renderEditPartRows(); }
@@ -571,7 +536,7 @@ function saveEditVehicle(id){
 
 function openDeleteVehicle(id){
   openModal(`<h3>Διαγραφή Οχήματος</h3>
-    <p>Διάλεξε τρόπο διαγραφής. Η <strong>RETURN</strong> επιστρέφει τα δεσμευμένα του ιδιοκτήτη στο Free. Η <strong>WIPE</strong> δεν επιστρέφει τίποτα.</p>
+    <p>RETURN: επιστρέφει τα δεσμευμένα του ιδιοκτήτη στο Free. WIPE: χωρίς επιστροφή.</p>
     <div class="flex right">
       <button class="btn warn" onclick="deleteVehicle('${id}','RETURN')">RETURN</button>
       <button class="btn danger" onclick="deleteVehicle('${id}','WIPE')">WIPE</button>
@@ -583,17 +548,14 @@ function deleteVehicle(id,mode){
   state.trash.vehicles.unshift(clone(v));
   if(mode==='RETURN'){
     const yourName = getOwner();
-    const committed = v.commits.filter(c=> c.kind==='commit' && c.name===yourName)
-      .reduce((a,c)=> a+Number(c.amount||0), 0);
-    const released = v.commits.filter(c=> c.kind==='release' && c.name===yourName)
-      .reduce((a,c)=> a+Number(c.amount||0), 0);
-    const toReturn = Math.max(0, committed - released);
+    const committed = v.commits.filter(c=> c.kind==='commit' && c.name===yourName).reduce((a,c)=>a+Number(c.amount||0),0);
+    const released  = v.commits.filter(c=> c.kind==='release' && c.name===yourName).reduce((a,c)=>a+Number(c.amount||0),0);
+    const toReturn = Math.max(0, committed-released);
     if(toReturn>0){
-      state.freeHistory.unshift({id:uid(), date:new Date().toISOString().slice(0,10), kind:'release', amount: toReturn, note:`RETURN από διαγραφή οχήματος ${v.title}`, ref:v.id});
+      state.freeHistory.unshift({id:uid(), date:new Date().toISOString().slice(0,10), kind:'release', amount:toReturn, note:`RETURN διαγραφή ${v.title}`, ref:v.id});
     }
   }
-  state.vehicles.splice(idx,1);
-  save(); closeModal(); draw();
+  state.vehicles.splice(idx,1); save(); closeModal(); draw();
 }
 
 function openVehicleExpenses(id){
@@ -637,7 +599,7 @@ function delExpense(id){
   if(e?.status==='paid' && e?.whoPaid===getOwner()){
     state.freeHistory = state.freeHistory.filter(x=> x.ref!==id);
   }
-  save(); draw(); if(e?.vehicleId) { closeModal(); openVehicleExpenses(e.vehicleId); }
+  save(); draw(); if(e?.vehicleId){ closeModal(); openVehicleExpenses(e.vehicleId); }
 }
 
 function openPartners(id){
@@ -674,7 +636,7 @@ function addCommit(id){
   const note = document.getElementById('pc_note').value;
   v.commits.unshift({id:uid(), kind, name, amount, date, note});
   if(name===getOwner()){
-    state.freeHistory.unshift({id:uid(), date, kind, amount: (kind==='commit'? -amount: amount), note:`${kind} ${v.title}`, ref:v.id});
+    state.freeHistory.unshift({id:uid(), date, kind, amount:(kind==='commit'?-amount:amount), note:`${kind} ${v.title}`, ref:v.id});
   }
   save(); closeModal(); openPartners(id);
 }
@@ -710,19 +672,18 @@ function saveSale(id){
   const t_title = document.getElementById('t_title')?.value?.trim();
   if(t_title){
     v.sale.tradeIn = {
-      title: t_title,
-      vin: document.getElementById('t_vin').value.trim(),
-      date: document.getElementById('t_date').value || '',
-      source: document.getElementById('t_source').value,
-      co: (document.getElementById('t_partners').value||'').split(',').map(x=>x.trim()).filter(Boolean),
-      note: document.getElementById('t_note').value||''
+      title:t_title, vin:document.getElementById('t_vin').value.trim(),
+      date:document.getElementById('t_date').value||'',
+      source:document.getElementById('t_source').value,
+      co:(document.getElementById('t_partners').value||'').split(',').map(x=>x.trim()).filter(Boolean),
+      note:document.getElementById('t_note').value||''
     };
     const newV = {
-      id:uid(), title: v.sale.tradeIn.title, vin: v.sale.tradeIn.vin, purchaseDate: v.sale.tradeIn.date,
-      purchasePrice: 0, customerVehicle:false,
+      id:uid(), title:v.sale.tradeIn.title, vin:v.sale.tradeIn.vin, purchaseDate:v.sale.tradeIn.date,
+      purchasePrice:0, customerVehicle:false,
       partners: v.sale.tradeIn.co.map(n=> ({name:n, capital:0})),
       sale:{price:0,date:'',settled:false,tradeIn:null},
-      commits:[], receipts:[], notes: v.sale.tradeIn.note, archived:false, deleted:false
+      commits:[], receipts:[], notes:v.sale.tradeIn.note, archived:false, deleted:false
     };
     state.vehicles.unshift(newV);
   }
@@ -780,9 +741,8 @@ function saveReceipt(id){
 
   const rec = {id:uid(), date, type, amount, dest, details:{}, owner, note};
   if(dest==='vehicle'){
-    const toVehId = prompt('Δώσε id οχήματος προορισμού (δες το στο Ιστορικό ή επεξεργασία):','');
-    if(!toVehId) return;
-    rec.details.toVehicle = toVehId;
+    const toVehId = prompt('Δώσε id οχήματος προορισμού:','');
+    if(!toVehId) return; rec.details.toVehicle = toVehId;
   }
   if(dest==='split'){
     rec.details.toVehicle = document.getElementById('r_toVeh').value||null;
@@ -796,7 +756,7 @@ function saveReceipt(id){
   v.receipts.unshift(rec);
   if(dest==='free'){
     state.freeHistory.unshift({id:uid(), date, kind:'receipt', amount, note:`Είσπραξη από ${v.title}`, ref:rec.id});
-  } else if(dest==='split'){
+  }else if(dest==='split'){
     const f = Number(rec.details.toFree||0);
     if(f>0) state.freeHistory.unshift({id:uid(), date, kind:'receipt', amount:f, note:`Split Free από ${v.title}`, ref:rec.id});
   }
@@ -910,11 +870,7 @@ function viewSold(host){
     tb.append(row);
   }
 }
-function unsell(id){
-  const v = state.vehicles.find(x=> x.id===id); if(!v) return;
-  v.sale.price = 0; v.sale.date=''; v.sale.settled=false;
-  save(); draw();
-}
+function unsell(id){ const v = state.vehicles.find(x=> x.id===id); if(!v) return; v.sale.price=0; v.sale.date=''; v.sale.settled=false; save(); draw(); }
 
 // -------- Old Debts
 function viewOldDebts(host){
@@ -995,19 +951,12 @@ function saveOldReceipt(id){
   const note = document.getElementById('or_note').value;
   const rec = {id:uid(), owner:getOwner(), type, amount, date, dest, note, details:{}};
   c.receipts.unshift(rec);
-  if(dest==='free'){
-    state.freeHistory.unshift({id:uid(), date, kind:'receipt', amount, note:`OldDebt: ${c.title}`, ref:rec.id});
-  }
+  if(dest==='free'){ state.freeHistory.unshift({id:uid(), date, kind:'receipt', amount, note:`OldDebt: ${c.title}`, ref:rec.id}); }
   save(); closeModal(); draw();
 }
 function delOld(id){ state.oldDebts.cases = state.oldDebts.cases.filter(x=> x.id!==id); save(); draw(); }
-function addOwed(){
-  const name = document.getElementById('ow_name').value;
-  const amount = Number(document.getElementById('ow_amt').value||0);
-  const note = document.getElementById('ow_note').value;
-  state.oldDebts.owedToMe.unshift({id:uid(), name, amount, note});
-  save(); draw();
-}
+function addOwed(){ const name=document.getElementById('ow_name').value; const amount=Number(document.getElementById('ow_amt').value||0); const note=document.getElementById('ow_note').value;
+  state.oldDebts.owedToMe.unshift({id:uid(), name, amount, note}); save(); draw(); }
 function delOwed(id){ state.oldDebts.owedToMe = state.oldDebts.owedToMe.filter(x=> x.id!==id); save(); draw(); }
 
 // -------- Trash
@@ -1033,37 +982,24 @@ function viewTrash(host){
       <button class="btn danger" onclick="purgeExpense('${e.id}')">Οριστική</button></td></tr>`));
   }
 }
-function restoreVehicle(id){
-  const idx = state.trash.vehicles.findIndex(x=> x.id===id); if(idx<0) return;
-  state.vehicles.unshift(state.trash.vehicles[idx]); state.trash.vehicles.splice(idx,1);
-  save(); draw();
-}
+function restoreVehicle(id){ const idx=state.trash.vehicles.findIndex(x=> x.id===id); if(idx<0) return; state.vehicles.unshift(state.trash.vehicles[idx]); state.trash.vehicles.splice(idx,1); save(); draw(); }
 function purgeVehicle(id){ state.trash.vehicles = state.trash.vehicles.filter(x=> x.id!==id); save(); draw(); }
-function restoreExpense(id){
-  const idx = state.trash.expenses.findIndex(x=> x.id===id); if(idx<0) return;
-  state.expenses.unshift(state.trash.expenses[idx]); state.trash.expenses.splice(idx,1);
-  save(); draw();
-}
+function restoreExpense(id){ const idx=state.trash.expenses.findIndex(x=> x.id===id); if(idx<0) return; state.expenses.unshift(state.trash.expenses[idx]); state.trash.expenses.splice(idx,1); save(); draw(); }
 function purgeExpense(id){ state.trash.expenses = state.trash.expenses.filter(x=> x.id!==id); save(); draw(); }
 
 // -------- Modal helpers
-function openModal(html){
-  document.getElementById('modalBody').innerHTML = html;
-  document.getElementById('modal').showModal();
-}
+function openModal(html){ document.getElementById('modalBody').innerHTML=html; document.getElementById('modal').showModal(); }
 function closeModal(){ document.getElementById('modal').close(); }
 
-// -------- Import/Export/PDF
+// -------- Import/Export/PDF (κύρια κουμπιά)
 document.getElementById('btnImport').onclick = ()=>{
   const inp = el(`<input type="file" accept="application/json">`);
   inp.onchange = (e)=>{
     const file = e.target.files[0]; if(!file) return;
     const reader = new FileReader();
     reader.onload = ()=>{
-      try{
-        const data = JSON.parse(reader.result);
-        state = migrate(data); save(); draw();
-      }catch(err){ showError('Import failed: '+err.message,'',0,0,err.stack); }
+      try{ state = migrate(JSON.parse(reader.result)); save(); draw(); alert('OK! Φορτώθηκε.'); }
+      catch(err){ showError('Import failed: '+err.message,'',0,0,err.stack); }
     };
     reader.readAsText(file);
   };
@@ -1072,10 +1008,35 @@ document.getElementById('btnImport').onclick = ()=>{
 document.getElementById('btnExport').onclick = ()=>{
   const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
-  const a = el(`<a download="center-car-v35.json"></a>`);
-  a.href = url; a.click(); URL.revokeObjectURL(url);
+  const a = el(`<a download="center-car-v35.json"></a>`); a.href=url; a.click(); URL.revokeObjectURL(url);
 };
-document.getElementById('btnPDF').onclick = ()=>{ window.print(); };
+document.getElementById('btnPDF').onclick = ()=> window.print();
+
+// -------- Δεύτερα κουμπιά (μέσα στη σελίδα) + Paste + Drag&Drop
+(function wireSecondaryButtons(){
+  const imp = document.getElementById('btnImport'), exp=document.getElementById('btnExport'), pdf=document.getElementById('btnPDF');
+  const imp2=document.getElementById('btnImport2'), exp2=document.getElementById('btnExport2'), pdf2=document.getElementById('btnPDF2');
+  if(imp && imp2) imp2.onclick = imp.onclick;
+  if(exp && exp2) exp2.onclick = exp.onclick;
+  if(pdf && pdf2) pdf2.onclick = pdf.onclick;
+})();
+document.getElementById('btnPaste').onclick = ()=>{
+  const txt = prompt('Επικόλλησε εδώ το JSON backup:'); if(!txt) return;
+  try{ state=migrate(JSON.parse(txt)); save(); draw(); alert('OK! Τα δεδομένα φορτώθηκαν.'); }
+  catch(err){ alert('JSON σφάλμα: '+err.message); }
+};
+// Drag & Drop οπουδήποτε
+window.addEventListener('dragover', e=>{ e.preventDefault(); });
+window.addEventListener('drop', e=>{
+  e.preventDefault();
+  const file = e.dataTransfer?.files?.[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{ state=migrate(JSON.parse(reader.result)); save(); draw(); alert('OK! Τα δεδομένα φορτώθηκαν.'); }
+    catch(err){ showError('Import failed: '+err.message,'',0,0,err.stack); }
+  };
+  reader.readAsText(file);
+});
 
 // -------- Init
 draw();
